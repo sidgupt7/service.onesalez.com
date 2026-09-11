@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS auth_trusted_devices (
+    trusted_device_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    device_id CHAR(32) NOT NULL,
+    actor_type ENUM('CLIENT_CONTACT', 'EMPLOYEE') NOT NULL,
+    actor_id BIGINT UNSIGNED NOT NULL,
+    device_name VARCHAR(100) NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    pin_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    failed_attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    locked_until DATETIME(6) NULL,
+    last_used_at DATETIME(6) NULL,
+    last_ip_address VARCHAR(45) NULL,
+    user_agent VARCHAR(500) NULL,
+    revoked_at DATETIME(6) NULL,
+    created_by VARCHAR(100) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (trusted_device_id),
+    UNIQUE KEY uq_trusted_device_id (device_id),
+    UNIQUE KEY uq_trusted_device_token (token_hash),
+    KEY ix_trusted_device_actor (actor_type, actor_id, revoked_at),
+    KEY ix_trusted_device_expiry (expires_at, revoked_at)
+) ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

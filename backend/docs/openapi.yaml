@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: ONESALEZ Service CRM API
+  version: 1.0.0
+servers:
+  - url: https://service.onesalez.com/api/v1
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Health check
+      responses:
+        '200': {description: Healthy, content: {application/json: {schema: {$ref: '#/components/schemas/Success'}}}}
+  /auth/login:
+    post:
+      security: []
+      summary: Authenticate a client contact or employee
+      requestBody: {$ref: '#/components/requestBodies/Login'}
+      responses:
+        '200': {description: Tokens issued}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {$ref: '#/components/responses/Validation'}
+  /auth/register:
+    post:
+      summary: Create an employee or a client contact within the caller's authority
+      responses:
+        '201': {description: User created}
+        '403': {$ref: '#/components/responses/Forbidden'}
+  /auth/refresh:
+    post:
+      security: []
+      summary: Rotate a refresh token
+      responses:
+        '200': {description: New token pair}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /auth/logout:
+    post:
+      summary: Revoke a refresh token
+      responses: {'200': {description: Logged out}}
+  /auth/forgot-password:
+    post:
+      security: []
+      summary: Queue a password-reset email
+      responses: {'200': {description: Non-enumerating acknowledgement}}
+  /auth/reset-password:
+    post:
+      security: []
+      summary: Set a password using a reset token
+      responses: {'200': {description: Password updated}, '401': {$ref: '#/components/responses/Unauthorized'}}
+  /leads:
+    get:
+      summary: Search and paginate leads
+      parameters:
+        - {$ref: '#/components/parameters/Pagination'}
+      responses: {'200': {description: Lead collection}}
+    post:
+      summary: Create a lead
+      responses: {'201': {description: Lead created}}
+  /leads/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get: {summary: Get a lead, responses: {'200': {description: Lead}, '404': {$ref: '#/components/responses/NotFound'}}}
+    put: {summary: Update a lead, responses: {'200': {description: Updated lead}}}
+    delete: {summary: Soft-delete a lead, responses: {'200': {description: Lead removed}}}
+  /leads/bulk-status:
+    post: {summary: Update the status of multiple leads, responses: {'200': {description: Update count}}}
+  /customers:
+    get: {summary: Search and paginate clients, responses: {'200': {description: Client collection}}}
+    post: {summary: Create a client, responses: {'201': {description: Client created}}}
+  /customers/onboard:
+    post:
+      summary: Atomically create a client, primary location, client administrator, and login account
+      responses:
+        '201': {description: Client onboarding completed}
+        '422': {$ref: '#/components/responses/Validation'}
+  /customers/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get: {summary: Get client, locations, and contacts, responses: {'200': {description: Client}}}
+    put: {summary: Update client, responses: {'200': {description: Updated client}}}
+    delete: {summary: Soft-delete client, responses: {'200': {description: Client removed}}}
+  /customers/{id}/service-history:
+    get:
+      summary: Paginated client service history
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: Ticket history}}
+  /tickets:
+    get: {summary: Filter and paginate visible tickets, responses: {'200': {description: Ticket collection}}}
+    post: {summary: Client contact raises a ticket, responses: {'201': {description: Ticket created}}}
+  /tickets/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+    get: {summary: Get ticket, attempts, and conversation, responses: {'200': {description: Ticket}}}
+    delete: {summary: Soft-delete a completed or declined ticket, responses: {'200': {description: Ticket removed}}}
+  /tickets/{id}/{action}:
+    post:
+      summary: Accept, release, complete, or decline a ticket
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+        - {name: action, in: path, required: true, schema: {type: string, enum: [accept, release, complete, decline]}}
+      responses: {'200': {description: Updated ticket}, '400': {description: Invalid state transition}}
+  /tickets/{id}/priority:
+    put:
+      summary: Change ticket priority
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: Updated ticket}}
+  /tickets/{id}/messages:
+    post:
+      summary: Add a public or employee-internal ticket message
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'201': {description: Message created}}
+  /analytics:
+    get:
+      summary: Executive service summary and employee performance
+      parameters:
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+      responses: {'200': {description: Analytics dashboard}}
+  /users:
+    get: {summary: Paginate employees and roles, responses: {'200': {description: Employee collection}}}
+  /users/{id}/suspend:
+    post:
+      summary: Suspend an employee and login account
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: Employee suspended}}
+  /teams:
+    post: {summary: Create a service team, responses: {'201': {description: Team created}}}
+  /teams/{team_id}/members:
+    post:
+      summary: Assign an employee to a team
+      parameters: [{name: team_id, in: path, required: true, schema: {type: integer}}]
+      responses: {'201': {description: Member assigned}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  requestBodies:
+    Login:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [email, password, realm]
+            properties:
+              email: {type: string, format: email}
+              password: {type: string, minLength: 12}
+              realm: {type: string, enum: [client, employee]}
+  parameters:
+    Pagination:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+  schemas:
+    Success:
+      type: object
+      required: [success, data, error, timestamp]
+      properties:
+        success: {type: boolean, const: true}
+        data: {}
+        error: {type: 'null'}
+        timestamp: {type: string, format: date-time}
+    Error:
+      type: object
+      properties:
+        success: {type: boolean, const: false}
+        data: {type: 'null'}
+        error:
+          type: object
+          properties: {code: {type: string}, message: {type: string}, details: {type: object}}
+        timestamp: {type: string, format: date-time}
+  responses:
+    Unauthorized: {description: Authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Forbidden: {description: Permission denied, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    NotFound: {description: Resource not found, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Validation: {description: Validation failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}

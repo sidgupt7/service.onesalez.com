@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ONESALEZ Service CRM">
+  <rect width="512" height="512" rx="112" fill="#0b1f3a"/>
+  <circle cx="256" cy="220" r="132" fill="#123f73"/>
+  <path d="M198 150h80c62 0 104 38 104 96s-42 96-104 96h-80c-62 0-104-38-104-96s42-96 104-96Zm4 52c-31 0-52 17-52 44s21 44 52 44h72c31 0 52-17 52-44s-21-44-52-44h-72Z" fill="#fff"/>
+  <path d="M155 394h202" stroke="#5da4e8" stroke-width="20" stroke-linecap="round"/>
+</svg>
+

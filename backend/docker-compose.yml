@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8080:80"
+    env_file: .env
+    depends_on:
+      database:
+        condition: service_healthy
+  database:
+    image: mariadb:11.8
+    environment:
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-local-root-password}
+    volumes:
+      - database_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  database_data:
+

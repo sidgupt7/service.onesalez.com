@@ -1,0 +1,15 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - public
+        - bootstrap.php
+        - bin
+    excludePaths:
+        analyse:
+            - vendor
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        # HTTP/database payloads are deliberately heterogeneous associative arrays.
+        # Concrete offset, argument, return, and method checks remain enabled at level 8.
+        - identifier: missingType.iterableValue

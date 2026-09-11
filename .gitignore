@@ -1,0 +1,15 @@
+# Private deployment credentials
+DEPLOYMENT_PRIVATE.md
+.deployment/
+.release/
+
+# PHP/runtime artifacts and secrets
+backend/.env
+backend/vendor/
+backend/logs/*.log
+backend/coverage/
+backend/.phpunit.cache/
+backend/.phpunit.result.cache
+backend/.phpstan.cache/
+/.idea/
+/.vscode/
