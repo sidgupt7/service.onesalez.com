@@ -1,0 +1,22 @@
+Options -Indexes
+RewriteEngine On
+
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !https [NC]
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Keep the application source and environment inaccessible from the web.
+RewriteRule ^app(?:/|$) - [F,L]
+
+# Send API requests to the PHP front controller.
+RewriteRule ^api/v1(?:/.*)?$ api/index.php [QSA,L]
+
+# Serve real static files, otherwise return the React application shell.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+RewriteRule ^ index.html [L]
+
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

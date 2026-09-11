@@ -786,6 +786,12 @@ The root rewrite sends `/api/v1/...` to PHP, serves real static assets, and retu
 
 Node.js does not run on Hostinger for this architecture: upload compiled static assets and run the PHP API. The current local production env file selects `/api/v1`; this source review does not verify whether that corrected build is deployed live.
 
+### 15.3 Automatic GitHub deployment (12 September 2026)
+
+The repository now includes `.github/workflows/deploy-hostinger.yml` and public deployment templates under `deploy/`. Pushes to `main` build/test the frontend, run PHP tests, install production dependencies, and deploy the resulting bundle to the existing `service` directory over SSH. The workflow also supports manual dispatch on `main`.
+
+The private server receiver lives outside the document root at `/home/u606070148/.onesalez-service-deploy/receive-release.sh`. A dedicated forced-command key is stored in GitHub Actions secrets with the pinned SSH host identity. The receiver preserves the server environment, logs, and uploads, backs up existing code/configuration, and restores previous files if deployment or live smoke checks fail. Database migrations remain manual. See `deploy/README.md` for configuration, limitations, backups, and rollback instructions. Workflow presence alone does not establish that a particular run succeeded; consult GitHub Actions and the live `deploy-version.txt`.
+
 ## 16. Security, logging, and operations
 
 ### 16.1 Implemented foundations

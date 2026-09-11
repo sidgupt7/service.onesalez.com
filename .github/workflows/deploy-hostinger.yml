@@ -1,0 +1,81 @@
+name: Deploy service.onesalez.com
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hostinger-service-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://service.onesalez.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45 # v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, dom
+          tools: composer:v2
+          coverage: none
+      - name: Build and test frontend
+        working-directory: webapp
+        env:
+          VITE_API_BASE_URL: /api/v1
+        run: |
+          npm ci
+          npm run check
+      - name: Test backend and install production dependencies
+        working-directory: backend
+        run: |
+          composer install --no-interaction --prefer-dist
+          composer test
+          composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+          composer check-platform-reqs --no-dev
+      - name: Assemble deployment
+        run: |
+          mkdir -p release/app release/api
+          cp -a webapp/dist/. release/
+          for path in bootstrap.php composer.json composer.lock src config bin database vendor; do
+            cp -a "backend/$path" release/app/
+          done
+          cp deploy/root.htaccess release/.htaccess
+          cp deploy/app.htaccess release/app/.htaccess
+          cp deploy/api-index.php release/api/index.php
+          printf '%s\n' "$GITHUB_SHA" > release/deploy-version.txt
+          tar -czf release.tar.gz -C release .
+      - name: Deploy to Hostinger
+        env:
+          DEPLOY_KEY: ${{ secrets.HOSTINGER_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.HOSTINGER_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/hostinger_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/hostinger_deploy ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/hostinger_deploy' EXIT
+          ssh -i ~/.ssh/hostinger_deploy -p 65002 \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
+            u606070148@194.5.156.162 "deploy $GITHUB_SHA" < release.tar.gz
+      - name: Verify deployed revision
+        run: |
+          actual=$(curl --fail --silent --show-error --retry 3 "https://service.onesalez.com/deploy-version.txt?revision=$GITHUB_SHA")
+          test "$actual" = "$GITHUB_SHA"
+          echo "Deployed $GITHUB_SHA to https://service.onesalez.com" >> "$GITHUB_STEP_SUMMARY"
