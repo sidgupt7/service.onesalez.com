@@ -10,6 +10,7 @@ import {
   Headphones,
   KeyRound,
   Moon,
+  RotateCcw,
   ShieldCheck,
   Sun,
   Trash2,
@@ -24,6 +25,7 @@ import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { ApiError, getHealth } from '../../lib/api';
 import { cn } from '../../lib/cn';
+import { resetApp } from '../../lib/reset-app';
 import { useAuth } from './AuthProvider';
 import { ForgotPasswordDialog } from './ForgotPasswordDialog';
 import { forgetTrustedProfile, homeForActor, trustedProfiles, type TrustedDeviceProfile } from './auth-api';
@@ -55,6 +57,8 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [resettingApp, setResettingApp] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<TrustedDeviceProfile[]>(() => trustedProfiles());
   const [selectedProfile, setSelectedProfile] = useState<TrustedDeviceProfile | null>(() => trustedProfiles()[0] || null);
   const [quickPin, setQuickPin] = useState('');
@@ -125,6 +129,17 @@ export function LoginPage() {
     setProfiles(remaining);
     setSelectedProfile(remaining[0] || null);
     setQuickPin('');
+  };
+
+  const handleResetApp = async () => {
+    setResettingApp(true);
+    setResetError(null);
+    try {
+      await resetApp();
+    } catch {
+      setResetError('Could not clear the app cache. Close other ONESALEZ tabs and try again.');
+      setResettingApp(false);
+    }
   };
 
   return (
@@ -288,6 +303,17 @@ export function LoginPage() {
           <p className="mt-8 text-center text-xs leading-5 text-[var(--muted)]">
             Need access? Contact your {realm === 'client' ? 'client administrator' : 'ONESALEZ system administrator'}.
           </p>
+          <div className="mt-5 border-t border-[var(--border)] pt-4 text-center">
+            <button type="button" onClick={handleResetApp} disabled={resettingApp || isSubmitting || quickSubmitting}
+              aria-describedby="reset-app-help"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold text-[var(--brand)] hover:bg-[var(--surface-soft)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--focus)] disabled:opacity-60">
+              <RotateCcw aria-hidden="true" className={cn('h-4 w-4', resettingApp && 'animate-spin')} />
+              {resettingApp ? 'Resetting app…' : 'Reset app'}
+            </button>
+            <p id="reset-app-help" className="mt-1 text-xs leading-5 text-[var(--muted)]">Page out of date? Clear cached app files and reload. Saved PINs are kept.</p>
+            {resetError && <p role="alert" className="mt-2 text-sm text-[var(--danger)]">{resetError}</p>}
+            {resettingApp && <p role="status" className="sr-only">Clearing cached app files and loading the latest version.</p>}
+          </div>
         </div>
 
         <footer className="text-center text-[11px] text-[var(--muted)]">© 2026 ONESALEZ · Secure service workspace</footer>

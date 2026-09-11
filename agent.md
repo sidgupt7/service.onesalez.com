@@ -788,6 +788,8 @@ Node.js does not run on Hostinger for this architecture: upload compiled static 
 
 ### 15.3 Automatic GitHub deployment (12 September 2026)
 
+The login page includes **Reset app** for stale browser data. It unregisters this application's service worker, deletes its ONESALEZ/Workbox caches, and reloads the login page with a fresh URL. Cookies, saved PIN registrations, and local account preferences are preserved. Failed cache clearing displays an error rather than silently claiming success.
+
 Production frontend builds always use the same-origin `/api/v1`, even if a local development environment URL is present. HTML and service-worker files carry no-cache headers. Login/reset/API routes bypass service-worker caches; other navigation uses a network-first cache. After migrating from an older cached PWA, clear only that site's service-worker/cache storage and reload if it still calls localhost. This does not require clearing cookies or saved account preferences.
 
 The repository now includes `.github/workflows/deploy-hostinger.yml` and public deployment templates under `deploy/`. Pushes to `main` build/test the frontend, run PHP tests, install production dependencies, and deploy the resulting bundle to the existing `service` directory over SSH. The workflow also supports manual dispatch on `main`.
