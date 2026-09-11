@@ -788,6 +788,8 @@ Node.js does not run on Hostinger for this architecture: upload compiled static 
 
 ### 15.3 Automatic GitHub deployment (12 September 2026)
 
+Production frontend builds always use the same-origin `/api/v1`, even if a local development environment URL is present. HTML and service-worker files carry no-cache headers. Login/reset/API routes bypass service-worker caches; other navigation uses a network-first cache. After migrating from an older cached PWA, clear only that site's service-worker/cache storage and reload if it still calls localhost. This does not require clearing cookies or saved account preferences.
+
 The repository now includes `.github/workflows/deploy-hostinger.yml` and public deployment templates under `deploy/`. Pushes to `main` build/test the frontend, run PHP tests, install production dependencies, and deploy the resulting bundle to the existing `service` directory over SSH. The workflow also supports manual dispatch on `main`.
 
 The private server receiver lives outside the document root at `/home/u606070148/.onesalez-service-deploy/receive-release.sh`. A dedicated forced-command key is stored in GitHub Actions secrets with the pinned SSH host identity. The receiver preserves the server environment, logs, and uploads, backs up existing code/configuration, and restores previous files if deployment or live smoke checks fail. Database migrations remain manual. See `deploy/README.md` for configuration, limitations, backups, and rollback instructions. Workflow presence alone does not establish that a particular run succeeded; consult GitHub Actions and the live `deploy-version.txt`.

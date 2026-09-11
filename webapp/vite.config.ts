@@ -28,8 +28,21 @@ export default defineConfig({
         ],
       },
       workbox: {
-        navigateFallback: '/index.html',
-        runtimeCaching: [],
+        // Always ask the server for the current HTML instead of serving an old app shell.
+        globIgnores: ['**/index.html'],
+        navigateFallback: undefined,
+        cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /^\/(api\/|reset-password(?:\/|$)|login(?:\/|$))/.test(url.pathname),
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: ({ request }) => request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: { cacheName: 'onesalez-pages-v2', networkTimeoutSeconds: 5, expiration: { maxEntries: 20 } },
+          },
+        ],
       },
     }),
   ],
