@@ -119,7 +119,7 @@ final class AuthController extends Controller
             'realm' => ['required', ['in' => ['client', 'employee']]],
         ]);
         $this->auth->requestPasswordReset(strtolower($data['email']), $data['realm']);
-        return Response::success(['message' => 'If the account exists, a reset email has been queued.']);
+        return Response::success(['message' => 'Request received. If this email matches an account, a reset link will arrive shortly. Allow up to 2 minutes and check your spam folder. The link expires after 30 minutes; your password changes only after you use it.']);
     }
 
     public function resetPassword(Request $request): Response

@@ -743,7 +743,7 @@ Installation is ready for normal use when the selected environment can serve the
 | `ADMIN_CODE`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` | CLI administrator provisioning/recovery inputs |
 | `VITE_API_BASE_URL` | Public browser API base URL; separate local and production values |
 
-No SMTP host/user/password environment contract is currently implemented by the email worker; it calls the host's PHP `mail()` transport. Separate staging settings must be configured as deployment environments rather than assuming a dedicated staging-config file exists.
+The email worker uses authenticated SMTP through PHPMailer. Configure SMTP_HOST, SMTP_PORT, SMTP_ENCRYPTION (ssl or tls), SMTP_USERNAME, SMTP_PASSWORD, MAIL_FROM, and MAIL_FROM_NAME in the private server environment. Separate staging settings must be configured as deployment environments rather than assuming a dedicated staging-config file exists.
 
 ## 15. Hostinger deployment
 
@@ -806,7 +806,7 @@ JWT authentication currently decodes token claims without checking current accou
 
 Monolog writes JSON application logs with date-based rotation and configurable retained-file count. The exception handler records request context and exceptions. Rotation is not a maximum-byte file cap, and a comprehensive request-access/audit log should not be assumed from the error logger alone. Keep logs private and avoid recording passwords/tokens.
 
-`php bin/email-worker.php` processes one eligible job per invocation. Failed `mail()` results are delayed by five minutes and marked failed after the attempt limit. The current worker releases its database row lock before sending without setting an exclusive processing state; overlapping workers can select the same pending job. Use a single non-overlapping worker until claiming/leases are fixed. Delivery and sender configuration must be verified on the actual host.
+`php bin/email-worker.php` processes up to 20 eligible jobs within a 45-second loop budget. Hostinger runs it every minute. A connection-scoped database advisory lock prevents overlapping workers; SMTP failures retry after two minutes, up to three attempts. Expired or superseded reset links are skipped. SENT means the SMTP server accepted the message, not proof of inbox delivery. A process crash after SMTP acceptance but before the status update can still cause a retry. Credentials and reset links are excluded from worker logs.
 
 ### 16.3 Backups and maintenance
 

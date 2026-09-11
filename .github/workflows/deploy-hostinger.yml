@@ -71,9 +71,9 @@ jobs:
           chmod 600 ~/.ssh/hostinger_deploy ~/.ssh/known_hosts
           trap 'rm -f ~/.ssh/hostinger_deploy' EXIT
           ssh -i ~/.ssh/hostinger_deploy -p 65002 \
-            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes -o 'HostKeyAlias=[194.5.156.162]:65002' \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=4 \
-            u606070148@194.5.156.162 "deploy $GITHUB_SHA" < release.tar.gz
+            u606070148@nl-srv-web1015.main-hosting.eu "deploy $GITHUB_SHA" < release.tar.gz
       - name: Verify deployed revision
         run: |
           actual=$(curl --fail --silent --show-error --retry 3 "https://service.onesalez.com/deploy-version.txt?revision=$GITHUB_SHA")

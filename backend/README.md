@@ -79,3 +79,11 @@ Copy `.env.example` to `.env`, provide strong local database passwords, then run
 - Refresh tokens are delivered only through Secure, HttpOnly, SameSite cookies. For local HTTP development, set `REFRESH_COOKIE_SECURE=false`; production must keep it `true`.
 
 See [OpenAPI](docs/openapi.yaml), [database schema](docs/database-schema.md), and [architecture decision](docs/adr/0001-framework-free-clean-architecture.md).
+
+### Password-reset email
+
+Set `SMTP_HOST=smtp.hostinger.com`, `SMTP_PORT=465`, `SMTP_ENCRYPTION=ssl`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `MAIL_FROM`, and `MAIL_FROM_NAME` in the private `.env`. The sender should match the authenticated mailbox. Never commit real credentials.
+
+Run `php bin/email-worker.php` every minute (Hostinger Advanced → Cron Jobs). The worker serializes execution with a database advisory lock, skips expired/superseded reset links, and records SMTP acceptance or failure in `email_jobs`. `SENT` means accepted by SMTP; inbox placement is not guaranteed. Failed attempts retry after two minutes, at most three times. Inspect job ID, status, attempts, processed time, and last_error; do not expose email bodies containing reset tokens.
+
+The forgot-password form confirms receipt of the request without revealing whether an account exists. A password changes only when the recipient completes the reset form. Links expire 30 minutes after requesting them; requesting another link supersedes the previous one.
