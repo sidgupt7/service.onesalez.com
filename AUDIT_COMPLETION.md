@@ -2,7 +2,7 @@
 
 Scope: the deployed PHP/MariaDB and React service CRM, measured against
 `BASE_UNDERSTANDING_V1.md`, `WEB_APP_HANDBOOK.md`, and the remaining-work inventory
-in `agent.md`. Work is isolated on `audit-completion` until validated.
+in `agent.md`. Implementation was reviewed on `audit-completion`, merged to `main`, and deployed after CI.
 
 ## Baseline
 
@@ -27,7 +27,7 @@ in `agent.md`. Work is isolated on `audit-completion` until validated.
 - [x] Add isolated MariaDB integration checks and meaningful browser workflow coverage.
 - [x] Run static analysis, style, dependency audit, build, unit and browser checks.
 - [x] Review migration/deployment recovery and reconcile API and operational documentation.
-- [ ] Deploy verified changes and verify production without mutating customer records.
+- [x] Deploy verified changes and verify production without mutating customer records.
 
 Attachments, SLA policy, native MAUI apps, and push notifications remain separate
 product initiatives in the source requirements, not assumed business rules.
@@ -69,10 +69,17 @@ fetching every matching row into the browser. Full CSV export intentionally
 walks all matching batches. Exact counts and wildcard searches remain workload
 sensitive; no unsupported high-volume throughput claim is made.
 
-## Evidence still pending
+## Release verification and limits
 
-Branch CI, container build and PHP 8.3/MariaDB 11.8 checks passed. Measured backend line coverage is **88.42% (2,108/2,384 lines)** and method coverage is **73.77%**. An 80% line-coverage gate now protects deployment. Deployment and live cache verification remain pending. See agent.md section 18 for remaining operational
+Branch CI, container build and PHP 8.3/MariaDB 11.8 checks passed. Measured backend line coverage is **88.42% (2,108/2,384 lines)** and method coverage is **73.77%**. An 80% line-coverage gate now protects deployment. The implementation deployed successfully as `cb318688d28bc6860b186072c88683db2d1dd76f`. [Deployment CI](https://github.com/sidgupt7/service.onesalez.com/actions/runs/34683114486) passed all gates. See agent.md section 18 for remaining operational
 policy and separate product initiatives. This audit is not a claim that every
 possible bug, browser or disaster scenario has been tested.
 
 Additional validation: an unmocked local browser workflow passed against PHP/MariaDB (onboarding, client login, reload/refresh, ticket creation, public reply, employee acceptance/completion and client resolution read), with no browser exceptions. A private database backup was also created successfully on Hostinger before deployment. Initial CI measured 52.63% backend line coverage; expanded HTTP workflows raised this to 88.42%. CI caught a missing unzip utility in the Docker image; it is now included.
+
+
+Production read-back verified all nine migrations, the new lead-conversion column/index migration, PHP 8.3.33 and MariaDB 11.8.9. Business-record counts stayed at one client, one employee and one ticket. The receiver created private code and database backups before migration. Guest Teams access returns 401, private source/environment access returns 403, and login HTML has no-store/no-cache headers.
+
+An isolated Chromium profile that had loaded the previous release and its service worker successfully upgraded to the new app. Live login/API connectivity passed with no browser exceptions. Reset app removed a seeded onesalez cache and preserved an unrelated cache; the resulting login screen was visually reviewed. No production passwords were reset, recovery emails sent, or customer tickets/accounts changed during this audit. Browser timing through the SSH proxy is not used as a production performance benchmark.
+
+A final documentation/line-ending commit records this evidence and makes PSR-12 checks reproducible on Windows as well as Linux. Subsequent deployment revision metadata may therefore be newer than the implementation revision above.
