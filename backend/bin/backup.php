@@ -23,7 +23,11 @@ chmod($credentialFile, 0600);
 $quote = static fn (string $value): string => '"' . str_replace(['\\', '"', "\r", "\n"], ['\\\\', '\\"', '\\r', '\\n'], $value) . '"';
 $configuration = "[client]\n";
 foreach (['host' => 'DB_HOST', 'port' => 'DB_PORT', 'user' => 'DB_USER', 'password' => 'DB_PASSWORD'] as $key => $env) {
-    $configuration .= $key . '=' . $quote((string) getenv($env)) . "\n";
+    $value = getenv($env);
+    if ($value === false || $value === '') {
+        $value = ['host' => '127.0.0.1', 'port' => '3306'][$key] ?? '';
+    }
+    $configuration .= $key . '=' . $quote($value) . "\n";
 }
 file_put_contents($credentialFile, $configuration);
 $target = $directory . '/database-' . gmdate('Ymd-His') . '-' . bin2hex(random_bytes(4)) . '.sql';

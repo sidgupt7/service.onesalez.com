@@ -54,8 +54,8 @@ be read with these changes.
 
 ## Browser behavior
 
-The login page and Settings contain **Reset app**. It clears application session
-and cached application files and reloads the login page. Existing PIN profiles
+The login page and Settings contain **Reset app**. It clears in-memory application
+data and cached application files and reloads the login page. Session cookies and PIN profiles
 are retained by the cache reset; Settings offers a separate action to remove
 PIN login. This does not clear the browser's unrelated browsing data or change
 the account password. Ordinary browser HTTP cache cannot be selectively erased

@@ -213,6 +213,16 @@ final class UserService
 
     private function employeeFields(array $data): array
     {
+        $this->validator->validate($data, [
+            'mobile_number' => [['max' => 20]], 'designation' => [['max' => 150]],
+            'department' => [['max' => 150]], 'joining_date' => [['max' => 10]],
+        ]);
+        if (!empty($data['joining_date'])) {
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $data['joining_date']);
+            if ($date === false || $date->format('Y-m-d') !== $data['joining_date']) {
+                throw new ValidationException(['joining_date' => ['Use a valid date in YYYY-MM-DD format.']]);
+            }
+        }
         $fields = array_intersect_key($data, array_flip([
             'employee_code', 'full_name', 'official_email', 'mobile_number', 'designation', 'department', 'joining_date',
         ]));

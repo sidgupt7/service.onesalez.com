@@ -94,6 +94,147 @@ final class WorkflowTest extends TestCase
         return [new AuthService($this->accounts, $tokens, $config), $tokens];
     }
 
+    private function http(Actor $actor): \Closure
+    {
+        foreach (['HOST', 'PORT', 'NAME', 'USER', 'PASSWORD'] as $key) {
+            putenv('DB_' . $key . '=' . (getenv('TEST_DB_' . $key) ?: ($key === 'HOST' ? '127.0.0.1' : '')));
+        }
+        putenv('APP_KEY=' . str_repeat('integration-key-', 4));
+        putenv('JWT_ISSUER=audit');
+        putenv('APP_URL=https://example.invalid');
+        putenv('APP_DEBUG=false');
+        $app = require dirname(__DIR__, 2) . '/bootstrap.php';
+        [$auth] = $this->auth();
+        $session = $auth->login($actor->email, self::PASSWORD, $actor->type === 'EMPLOYEE' ? 'employee' : 'client', '127.0.0.1', 'test');
+        return static function (string $method, string $path, array $body = [], array $query = [], int $status = 200) use ($app, $session): array {
+            $response = $app->run(new Request($method, '/api/v1' . $path, $query, $body, ['authorization' => 'Bearer ' . $session['access_token']], '127.0.0.1'));
+            self::assertSame($status, $response->status, $method . ' ' . $path . ' ' . json_encode($response->payload['error'] ?? null));
+            return $response->payload['data'] ?? [];
+        };
+    }
+
+    public function testHttpEmployeeAndTeamAdministrationRoundTrip(): void
+    {
+        $http = $this->http($this->admin);
+        $input = ['employee_code' => 'CRUD-' . $this->suffix, 'full_name' => 'CRUD employee', 'official_email' => 'crud-' . $this->suffix . '@example.invalid', 'password' => self::PASSWORD, 'roles' => ['SERVICE_EMPLOYEE'], 'joining_date' => '2026-01-01'];
+        $id = $http('POST', '/users', $input, [], 201)['employee_id'];
+        $input['full_name'] = 'Updated employee';
+        self::assertSame('Updated employee', $http('PUT', '/users/' . $id, $input)['full_name']);
+        self::assertSame($id, $http('GET', '/users/' . $id)['employee_id']);
+        self::assertSame(1, $http('GET', '/users', [], ['paginated' => '1', 'search' => $input['official_email']])['total']);
+        $http('POST', '/users/' . $id . '/suspend', ['reason' => 'Audit']);
+        self::assertNull($this->accounts->actor('EMPLOYEE', (int) $id));
+        $http('POST', '/users/' . $id . '/reactivate');
+        self::assertNotNull($this->accounts->actor('EMPLOYEE', (int) $id));
+        $http('PUT', '/users/' . $id . '/password', ['password' => 'New exact password!']);
+        [$auth] = $this->auth();
+        self::assertSame($id, $auth->login($input['official_email'], 'New exact password!', 'employee', '127.0.0.1', 'test')['actor']->id);
+        $team = $http('POST', '/teams', ['team_name' => 'Audit ' . $this->suffix], [], 201)['team_id'];
+        $http('POST', '/teams/' . $team . '/members', ['employee_id' => $id, 'is_team_lead' => true], [], 201);
+        $updated = $http('PUT', '/teams/' . $team, ['team_name' => 'Updated team ' . $this->suffix, 'description' => 'Audit members']);
+        self::assertSame('Updated team ' . $this->suffix, $updated['team_name']);
+        self::assertNotEmpty($http('GET', '/teams'));
+        $http('DELETE', '/teams/' . $team . '/members/' . $id);
+        $http('DELETE', '/teams/' . $team);
+        $http('DELETE', '/users/' . $id);
+        $http('GET', '/users/' . $id, [], [], 404);
+        $http('POST', '/users/' . $this->admin->id . '/suspend', [], [], 403);
+        $http('POST', '/users', array_replace($input, ['joining_date' => '2026-02-30']), [], 422);
+    }
+
+    public function testHttpClientMaintenancePreservesScopesAndHistory(): void
+    {
+        $http = $this->http($this->employee);
+        $id = $this->client['client_id'];
+        $base = '/customers/' . $id;
+        self::assertSame('UPDATED BUSINESS', $http('PUT', $base, ['legal_name' => 'Updated business'])['legal_name']);
+        self::assertSame(1, $http('GET', '/customers', [], ['paginated' => '1', 'search' => $this->suffix])['total']);
+        $location = ['location_code' => 'CRUD', 'location_name' => 'Audit office', 'location_type' => 'BRANCH', 'address_line_1' => 'Test road', 'city' => 'Delhi', 'state_name' => 'Delhi', 'postal_code' => '110001'];
+        $client = $http('POST', $base . '/locations', $location, [], 201);
+        $site = array_values(array_filter($client['locations'], static fn (array $row): bool => $row['location_code'] === 'CRUD'))[0]['location_id'];
+        $http('PUT', $base . '/locations/' . $site, array_replace($location, ['city' => 'Mumbai']));
+        $http('POST', $base . '/locations/' . $site . '/suspend');
+        $http('POST', $base . '/locations/' . $site . '/reactivate');
+        $contact = ['full_name' => 'Extra contact', 'email' => 'extra-' . $this->suffix . '@example.invalid', 'mobile_number' => '9999999999', 'role_code' => 'CLIENT_ADMIN', 'location_ids' => [$site], 'has_all_locations' => false, 'portal_enabled' => true, 'password' => self::PASSWORD];
+        $client = $http('POST', $base . '/contacts', $contact, [], 201);
+        $person = array_values(array_filter($client['contacts'], static fn (array $row): bool => $row['email'] === $contact['email']))[0]['contact_id'];
+        self::assertNotNull($this->accounts->actor('CLIENT_CONTACT', (int) $person));
+        $http('PUT', $base . '/contacts/' . $person, array_replace($contact, ['full_name' => 'Edited contact', 'password' => '']));
+        $http('POST', $base . '/contacts/' . $person . '/suspend');
+        self::assertNull($this->accounts->actor('CLIENT_CONTACT', (int) $person));
+        $http('POST', $base . '/contacts/' . $person . '/reactivate');
+        $http('PUT', $base . '/contacts/' . $person, array_replace($contact, ['password' => str_repeat('a', 73)]), [], 422);
+        $http('DELETE', $base . '/contacts/' . $person);
+        $http('DELETE', $base . '/locations/' . $site);
+        $http('GET', $base . '/service-history');
+        $http('POST', $base . '/suspend');
+        self::assertNull($this->accounts->actor('CLIENT_CONTACT', $this->contact->id));
+        $http('POST', $base . '/reactivate');
+        $http('POST', $base . '/unsupported', [], [], 400);
+        $created = $http('POST', '/customers', ['client_code' => 'MIN-' . $this->suffix, 'legal_name' => 'Minimal client'], [], 201);
+        $http('DELETE', '/customers/' . $created['client_id']);
+        $http('GET', '/customers/' . $created['client_id'], [], [], 404);
+    }
+
+    public function testHttpLeadAndTicketLifecycleAndReportContracts(): void
+    {
+        $admin = $this->http($this->admin);
+        $contact = $this->http($this->contact);
+        $lead = $admin('POST', '/leads', ['business_name' => 'HTTP prospect', 'contact_name' => 'Prospect', 'email' => 'prospect-' . $this->suffix . '@example.invalid'], [], 201);
+        $id = $lead['lead_id'];
+        self::assertSame('CONTACTED', $admin('PUT', '/leads/' . $id, ['status' => 'CONTACTED'])['status']);
+        self::assertSame(1, $admin('POST', '/leads/bulk-status', ['ids' => [$id], 'status' => 'QUALIFIED'])['updated']);
+        self::assertSame('QUALIFIED', $admin('GET', '/leads/' . $id)['status']);
+        self::assertSame(1, $admin('GET', '/leads', [], ['paginated' => '1', 'search' => $this->suffix])['total']);
+        $admin('POST', '/leads/' . $id . '/convert', [], [], 422);
+        $admin('DELETE', '/leads/' . $id);
+        $admin('GET', '/leads/' . $id, [], [], 404);
+        $ticket = $contact('POST', '/tickets', ['location_id' => $this->client['locations'][0]['location_id'], 'subject' => 'HTTP ticket', 'issue_description' => 'Initial issue'], [], 201);
+        $path = '/tickets/' . $ticket['ticket_id'];
+        self::assertSame('Edited issue', $contact('PUT', $path . '/description', ['issue_description' => 'Edited issue'])['issue_description']);
+        $contact('POST', $path . '/messages', ['message' => 'Public client message'], [], 201);
+        $admin('POST', $path . '/messages', ['message' => 'Internal service note', 'is_internal' => true], [], 201);
+        self::assertCount(1, $contact('GET', $path)['messages']);
+        self::assertCount(2, $admin('GET', $path)['messages']);
+        self::assertSame('URGENT', $admin('PUT', $path . '/priority', ['priority' => 'URGENT'])['priority']);
+        foreach (['accept', 'release', 'accept', 'complete', 'decline'] as $action) {
+            $admin('POST', $path . '/' . $action, ['note' => 'Required audit note']);
+        }
+        $contact('GET', $path, [], [], 403);
+        $admin('GET', '/analytics', [], ['from' => '2026-09-01', 'to' => '2026-09-30']);
+        $admin('GET', '/analytics', [], ['from' => '2026-02-30'], 422);
+        $ledger = $admin('GET', '/reports/service-ledger', [], ['client_id' => $this->client['client_id'], 'from' => '2026-01-01', 'to' => '2026-12-31']);
+        self::assertSame(1, $ledger['total']);
+        $admin('DELETE', $path);
+        $admin('GET', $path, [], [], 404);
+    }
+
+    public function testHttpPinAndRecoveryRevokeOldCredentials(): void
+    {
+        $http = $this->http($this->admin);
+        $http('POST', '/auth/trusted-device', ['pin' => '123', 'device_name' => 'Audit'], [], 422);
+        $device = $http('POST', '/auth/trusted-device', ['pin' => '123456', 'device_name' => 'Audit browser'], [], 201);
+        $pin = ['device_id' => $device['device_id'], 'device_token' => $device['device_token'], 'pin' => '123456'];
+        $http('POST', '/auth/pin-login', array_replace($pin, ['pin' => '111111']), [], 401);
+        self::assertSame($this->admin->id, $http('POST', '/auth/pin-login', $pin)['actor']->id);
+        $http('DELETE', '/auth/trusted-device', ['device_id' => $device['device_id']]);
+        $http('POST', '/auth/pin-login', $pin, [], 401);
+        $known = $http('POST', '/auth/forgot-password', ['email' => $this->admin->email, 'realm' => 'employee']);
+        $unknown = $http('POST', '/auth/forgot-password', ['email' => 'absent-' . $this->suffix . '@example.invalid', 'realm' => 'employee']);
+        self::assertSame($known, $unknown);
+        $statement = $this->db->connection()->prepare('SELECT body FROM email_jobs WHERE recipient_email=? ORDER BY email_job_id DESC LIMIT 1');
+        $statement->execute([$this->admin->email]);
+        preg_match('/https:\/\/\S+/', (string) $statement->fetchColumn(), $matches);
+        parse_str((string) parse_url($matches[0], PHP_URL_QUERY), $query);
+        $http('POST', '/auth/reset-password', ['realm' => 'employee', 'token' => $query['token'], 'password' => 'Recovered exact password!']);
+        $http('GET', '/users', [], [], 401);
+        $http('POST', '/auth/reset-password', ['realm' => 'employee', 'token' => $query['token'], 'password' => 'Another exact password!'], [], 401);
+        $http('POST', '/auth/login', ['realm' => 'employee', 'email' => $this->admin->email, 'password' => self::PASSWORD], [], 401);
+        self::assertSame($this->admin->id, $http('POST', '/auth/login', ['realm' => 'employee', 'email' => $this->admin->email, 'password' => 'Recovered exact password!'])['actor']->id);
+        $http('POST', '/auth/refresh', [], [], 401);
+        $http('POST', '/auth/logout');
+    }
+
     public function testLocationScopeProtectsListDetailDescriptionAndClientProfile(): void
     {
         $allowed = $this->createTicket();
@@ -294,6 +435,7 @@ final class WorkflowTest extends TestCase
         }
         putenv('APP_KEY=' . str_repeat('integration-key-', 4));
         putenv('JWT_ISSUER=audit');
+        putenv('APP_URL=https://example.invalid');
         putenv('APP_DEBUG=false');
         $app = require dirname(__DIR__, 2) . '/bootstrap.php';
         $login = $app->run(new Request('POST', '/api/v1/auth/login', [], ['email' => $this->contact->email, 'password' => self::PASSWORD, 'realm' => 'client'], [], '127.0.0.1'));

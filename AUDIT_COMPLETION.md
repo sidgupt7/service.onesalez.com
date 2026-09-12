@@ -36,7 +36,7 @@ establish production completeness.
 
 ## Local verification results
 
-- PHP 8.5.8: **31 tests, 104 assertions** including 14 real MariaDB integration tests. Concurrent acceptance/refresh/last-admin changes, location/role isolation, reset expiry/replay/revocation, lifecycle rollback, real client conversion and duplicate onboarding are covered.
+- PHP 8.5.8: **35 tests, 207 assertions** including 18 real MariaDB integration tests. Concurrent acceptance/refresh/last-admin changes, location/role isolation, reset expiry/replay/revocation, lifecycle rollback, real client conversion and duplicate onboarding are covered.
 - PHPStan level 8 and PSR-12 pass. Composer and npm audits report zero known advisories for the installed locked dependencies.
 - TypeScript, production build and **18 frontend unit tests** pass. CSV tests export 1,001 rows over three batches and reject spreadsheet formulas.
 - **20 browser scenarios** pass across desktop Chromium and Pixel 7 Chromium emulation. These use mocked APIs with service workers blocked. Desktop/mobile dashboard screenshots were reviewed; table overflow is confined to its scrollable region.
@@ -75,3 +75,5 @@ Branch CI, container build, coverage measurement, deployment and live cache
 verification are pending. See agent.md section 18 for remaining operational
 policy and separate product initiatives. This audit is not a claim that every
 possible bug, browser or disaster scenario has been tested.
+
+Additional validation: an unmocked local browser workflow passed against PHP/MariaDB (onboarding, client login, reload/refresh, ticket creation, public reply, employee acceptance/completion and client resolution read), with no browser exceptions. A private database backup was also created successfully on Hostinger before deployment. Initial CI measured 52.63% backend line coverage; expanded HTTP workflow coverage is being remeasured. CI caught a missing unzip utility in the Docker image; it is now included.

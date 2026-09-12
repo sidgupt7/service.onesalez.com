@@ -293,6 +293,7 @@ final class ClientService
     private function contactData(int $clientId, array $input, Actor $actor, bool $requiresInitialPassword): array
     {
         $sanitized = Input::sanitize($input);
+        $this->validator->validate($sanitized, ['password' => [['min' => 12]]]);
         $locationIds = is_array($sanitized['location_ids'] ?? null) ? $sanitized['location_ids'] : [];
         $portalEnabled = filter_var($sanitized['portal_enabled'] ?? false, FILTER_VALIDATE_BOOL);
         $password = (string) ($sanitized['password'] ?? '');
@@ -308,9 +309,6 @@ final class ClientService
             'mobile_number' => ['required', ['max' => 20]],
             'role_code' => ['required', ['in' => ['SYSTEM_OPERATOR', 'END_USER', 'CLIENT_ADMIN', 'OWNER']]],
         ]);
-        if ($data['role_code'] === 'CLIENT_ADMIN' && !in_array('SYSTEM_ADMIN', $actor->roles, true)) {
-            throw new AuthorizationException('Only a system administrator may assign the client administrator role.');
-        }
         if (!$data['has_all_locations'] && !$this->repository->locationsBelongToClient($clientId, $locationIds)) {
             throw new ValidationException(['location_ids' => ['One or more selected sites do not belong to this client.']]);
         }

@@ -1,6 +1,6 @@
 FROM php:8.3-apache
 
-RUN apt-get update && apt-get install -y --no-install-recommends libonig-dev mariadb-client \
+RUN apt-get update && apt-get install -y --no-install-recommends libonig-dev mariadb-client unzip \
     && docker-php-ext-install pdo_mysql mbstring opcache \
     && rm -rf /var/lib/apt/lists/* \
     && a2enmod rewrite headers expires
