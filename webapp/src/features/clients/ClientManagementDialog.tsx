@@ -158,7 +158,7 @@ export function ClientManagementDialog({
             <ContactsEditor
               client={client.data}
               pending={pending}
-              canAssignAdmin={Boolean(actor?.roles.includes("SYSTEM_ADMIN"))}
+              canAssignAdmin={actor?.type === "EMPLOYEE"}
               apply={apply}
               request={authenticatedRequest}
             />

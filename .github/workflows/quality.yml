@@ -56,6 +56,7 @@ jobs:
           composer cs
           php -d memory_limit=512M vendor/bin/phpstan analyse --memory-limit=512M --no-progress
           php vendor/bin/phpunit --coverage-text --coverage-clover coverage/clover.xml
+          php bin/check-coverage.php coverage/clover.xml 80
       - name: Frontend unit, build, and browser tests
         working-directory: webapp
         run: |

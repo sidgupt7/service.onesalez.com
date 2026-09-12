@@ -189,7 +189,7 @@ API actors use `CLIENT_CONTACT` and `EMPLOYEE`. Login includes the realm, allowi
 
 Employees can have multiple roles through `employee_role_assignments`. Permissions are linked to roles through `employee_role_permissions`.
 
-**Current implementation differences:** client maintenance in `ClientService` generally checks only that the caller is an employee. It does not consistently enforce `clients.manage`. Its contact-management path restricts assignment of `CLIENT_ADMIN` to a `SYSTEM_ADMIN`, but onboarding and registration use different paths. `UserService::registerContact()` separately permits a client-side administrator to create contacts through `/auth/register`. These paths need reconciliation with the approved admin-only rules; do not infer identical authorization from screen labels or the seed permission matrix.
+Client maintenance and client-admin contact assignment require an ONESALEZ employee, consistently across onboarding and contact management. Client contacts cannot register other contacts through /auth/register. Employee and team administration require SYSTEM_ADMIN. Client-admin is a client role and never grants ONESALEZ employee privileges.
 
 ## 5. Application functionality
 
@@ -207,7 +207,7 @@ CLI utilities create the initial system administrator and recover an existing ad
 
 The administration layout has a sidebar, mobile navigation, header/account identity, page navigation, API health indication, theme switching, password change, and logout. Employee administration is restricted by its route to `SYSTEM_ADMIN`; reports require `analytics.view`.
 
-The overview currently displays account/access information and static status cards. It does not yet load the executive service metrics from the analytics API. In particular, the overview's static “Connected” wording is not database readiness evidence.
+The overview loads live executive metrics from /analytics: creation-cohort summary, current backlog age, daily volume and employee performance. Date filters use India calendar dates. API health is a separate liveness indicator, not database readiness evidence.
 
 ### 5.3 Client onboarding and maintenance
 
@@ -245,7 +245,7 @@ Team creation and membership assignment APIs exist. Membership can identify a te
 
 The backend provides lead creation, retrieval, update, soft deletion, list/search/filter/pagination, assignment to an employee, and bulk status updates. Statuses are `NEW`, `CONTACTED`, `QUALIFIED`, `WON`, and `LOST`.
 
-The frontend Leads menu is disabled and there is no active Leads route. Changing a lead to `WON` does not automatically create a client; lead conversion remains a separate feature to implement.
+The Leads route supports search, server pagination, CRUD, bulk status and an explicit conversion form. Conversion atomically creates the client, site, contact and account and records converted_client_id; merely choosing WON does not create a client.
 
 ### 5.8 Unified service reporting
 
@@ -255,11 +255,11 @@ The frontend Leads menu is disabled and there is no active Leads route. Changing
 
 The analytics endpoint returns status totals and per-employee attempts, completions, releases, and average attempt duration. Despite its `team_performance` response key, this query groups by employee rather than by the `teams` table.
 
-The current reporting screen requests at most 500 rows and exports those loaded rows. The ticket portal/console fetch the first 100 tickets. Full pagination and complete export across larger datasets remain work.
+Reports request 50 rows per page; ticket screens request 25. Server totals and status counts cover the whole authorized query. CSV retrieves all matching batches using before_id and protects formula text.
 
 ### 5.9 PWA and user experience
 
-The PWA configuration generates an installable shell with a manifest, icon, navigation fallback, and automatic service-worker updates. Runtime API caching is empty. Offline ticket creation, mutation queues, conflict resolution, and push notifications are not implemented. Language packages and charting packages are installed, but their presence is not evidence of completed multilingual screens or dashboard charts.
+The PWA precaches hashed application assets and updates its service worker automatically. Login/reset/API use NetworkOnly; other page navigations use NetworkFirst. HTML is excluded from precache. Offline mutation queues, conflict resolution and push notifications are separate product initiatives. English is the initial supported language; live dashboard charts are implemented with accessible HTML.
 
 ## 6. Service ticket lifecycle
 
@@ -273,7 +273,7 @@ The PWA configuration generates an installable shell with a manifest, icon, navi
 | Client edits description | `OPEN` or `ACCEPTED` | Unchanged | Stores old/new description and changing contact |
 | Soft delete | `COMPLETED` or `DECLINED` | Hidden by deletion filter | Preserves ticket and associated records |
 
-Acceptance and attempt-ending transitions use database transactions. The conditional acceptance update ensures one employee wins a competing acceptance. The creation of a ticket and its first history row are currently separate service calls rather than one encompassing transaction.
+Ticket creation and initial OPEN history commit together. Acceptance and attempt-ending transitions lock the ticket and preserve prior attempts. Concurrent acceptance tests verify one winning employee and one new attempt.
 
 The original request described administrator decline “at any stage.” Current code rejects decline after completion or an earlier decline. The documented current behavior is therefore narrower; any change needs an explicit lifecycle decision and matching tests.
 
@@ -395,7 +395,7 @@ Request numbers are generated in PHP using `SR-` plus a UTC date and random hexa
 
 ### 9.4 Sales domain — one table
 
-`leads` has primary key `lead_id`. It stores `business_name`, `contact_name`, required email, phone, source, status, optional `assigned_employee_id`, notes, and creation/update/deletion metadata. The employee foreign key records responsibility. Indexes support status/deletion/name searches and employee/status queries. No foreign key or conversion record currently links a won lead to a new client.
+`leads` has primary key `lead_id`. It stores `business_name`, `contact_name`, required email, phone, source, status, optional `assigned_employee_id`, notes, and creation/update/deletion metadata. The employee foreign key records responsibility. Indexes support status/deletion/name searches and employee/status queries. Migration 007 adds indexed converted_client_id; the conversion service sets it atomically when onboarding succeeds.
 
 ### 9.5 Authentication and infrastructure — five tables including migration tracking
 
@@ -755,7 +755,7 @@ The project owner's confirmed deployment directory is:
 /home/u606070148/domains/onesalez.com/public_html/service
 ```
 
-The supplied SSH endpoint is user `u606070148`, host `194.5.156.162`, port `65002`. Credentials/keys remain private. A deployment connects with `ssh -p 65002 u606070148@194.5.156.162` when access is configured.
+The deployment SSH endpoint is user u606070148, host nl-srv-web1015.main-hosting.eu, port 65002, with the pinned legacy HostKeyAlias [194.5.156.162]:65002. Credentials and administrator SSH configuration stay private.
 
 The repository's shared-hosting templates expect this mapping:
 
@@ -784,7 +784,7 @@ The root rewrite sends `/api/v1/...` to PHP, serves real static assets, and retu
 11. Verify HTTPS browser login, refresh, logout, protected routes, password recovery, client/site access, and the ticket lifecycle. Test a direct navigation to `/admin/clients` to confirm SPA routing.
 12. Retain the previous release for rollback. Code rollback does not automatically reverse database migrations or data changes.
 
-Node.js does not run on Hostinger for this architecture: upload compiled static assets and run the PHP API. The current local production env file selects `/api/v1`; this source review does not verify whether that corrected build is deployed live.
+Node.js does not run on Hostinger for this architecture: upload compiled static assets and run the PHP API. The current local production env file selects `/api/v1`; live revision and browser checks are recorded in AUDIT_COMPLETION.md.
 
 ### 15.3 Automatic GitHub deployment (12 September 2026)
 
@@ -794,7 +794,7 @@ Production frontend builds always use the same-origin `/api/v1`, even if a local
 
 The repository now includes `.github/workflows/deploy-hostinger.yml` and public deployment templates under `deploy/`. Pushes to `main` build/test the frontend, run PHP tests, install production dependencies, and deploy the resulting bundle to the existing `service` directory over SSH. The workflow also supports manual dispatch on `main`.
 
-The private server receiver lives outside the document root at `/home/u606070148/.onesalez-service-deploy/receive-release.sh`. A dedicated forced-command key is stored in GitHub Actions secrets with the pinned SSH host identity. The receiver preserves the server environment, logs, and uploads, backs up existing code/configuration, and restores previous files if deployment or live smoke checks fail. Database migrations remain manual. See `deploy/README.md` for configuration, limitations, backups, and rollback instructions. Workflow presence alone does not establish that a particular run succeeded; consult GitHub Actions and the live `deploy-version.txt`.
+The private server receiver lives outside the document root at `/home/u606070148/.onesalez-service-deploy/receive-release.sh`. A dedicated forced-command key is stored in GitHub Actions secrets with the pinned SSH host identity. The receiver preserves the server environment, logs, and uploads, backs up existing code/configuration, and restores previous files if deployment or live smoke checks fail. The receiver creates a private database backup and runs the locked/checksummed migration runner before switching the frontend. See `deploy/README.md` for configuration, limitations, backups, and rollback instructions. Workflow presence alone does not establish that a particular run succeeded; consult GitHub Actions and the live `deploy-version.txt`.
 
 ## 16. Security, logging, and operations
 
@@ -804,7 +804,7 @@ The code provides native PDO prepared statements, allowlisted dynamic fields, tr
 
 `CsrfMiddleware` exists but is not attached to current routes in bootstrap. Bearer-token endpoints and cookie-backed refresh/logout have different exposure; review cookie/origin behavior for the actual deployment instead of assuming that an unused middleware protects every request.
 
-JWT authentication currently decodes token claims without checking current account/role state on every request. Suspension or password reset may revoke renewal credentials while an already issued access token remains valid until expiry. Immediate access revocation needs an additional mechanism if required.
+JWT authentication checks the linked refresh session and current account/role state on every request. Suspension, logout and password changes revoke access immediately. Concurrent refresh is single-use and credential changes revoke trusted PIN devices.
 
 ### 16.2 Logs and email processing
 

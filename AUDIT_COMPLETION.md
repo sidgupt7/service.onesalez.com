@@ -71,9 +71,8 @@ sensitive; no unsupported high-volume throughput claim is made.
 
 ## Evidence still pending
 
-Branch CI, container build, coverage measurement, deployment and live cache
-verification are pending. See agent.md section 18 for remaining operational
+Branch CI, container build and PHP 8.3/MariaDB 11.8 checks passed. Measured backend line coverage is **88.42% (2,108/2,384 lines)** and method coverage is **73.77%**. An 80% line-coverage gate now protects deployment. Deployment and live cache verification remain pending. See agent.md section 18 for remaining operational
 policy and separate product initiatives. This audit is not a claim that every
 possible bug, browser or disaster scenario has been tested.
 
-Additional validation: an unmocked local browser workflow passed against PHP/MariaDB (onboarding, client login, reload/refresh, ticket creation, public reply, employee acceptance/completion and client resolution read), with no browser exceptions. A private database backup was also created successfully on Hostinger before deployment. Initial CI measured 52.63% backend line coverage; expanded HTTP workflow coverage is being remeasured. CI caught a missing unzip utility in the Docker image; it is now included.
+Additional validation: an unmocked local browser workflow passed against PHP/MariaDB (onboarding, client login, reload/refresh, ticket creation, public reply, employee acceptance/completion and client resolution read), with no browser exceptions. A private database backup was also created successfully on Hostinger before deployment. Initial CI measured 52.63% backend line coverage; expanded HTTP workflows raised this to 88.42%. CI caught a missing unzip utility in the Docker image; it is now included.

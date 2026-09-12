@@ -2,15 +2,14 @@
 
 declare(strict_types=1);
 
-$file = $argv[1] ?? 'coverage/clover.xml';
-$minimum = (float) ($argv[2] ?? 80);
-$xml = simplexml_load_file($file);
-if ($xml === false) {
-    throw new RuntimeException('Unable to read Clover coverage report.');
+$arguments = $_SERVER['argv'] ?? [];
+$report = simplexml_load_file($arguments[1] ?? 'coverage/clover.xml');
+$metrics = $report === false ? [] : $report->xpath('/coverage/project/metrics');
+if ($metrics === false || $metrics === [] || (int) $metrics[0]['statements'] <= 0) {
+    fwrite(STDERR, "Missing or empty coverage report.\n");
+    exit(1);
 }
-$metrics = $xml->project->metrics;
-$statements = (int) $metrics['statements'];
-$covered = (int) $metrics['coveredstatements'];
-$percentage = $statements === 0 ? 0.0 : ($covered / $statements) * 100;
-fwrite(STDOUT, sprintf("Statement coverage: %.2f%%\n", $percentage));
-exit($percentage >= $minimum ? 0 : 1);
+$coverage = 100 * (int) $metrics[0]['coveredstatements'] / (int) $metrics[0]['statements'];
+$minimum = (float) ($arguments[2] ?? 80);
+fwrite(STDOUT, sprintf("Backend line coverage %.2f%%; required %.2f%%\n", $coverage, $minimum));
+exit($coverage >= $minimum ? 0 : 1);
