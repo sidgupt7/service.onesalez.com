@@ -1,6 +1,8 @@
 FROM php:8.3-apache
 
-RUN docker-php-ext-install pdo_mysql opcache \
+RUN apt-get update && apt-get install -y --no-install-recommends libonig-dev mariadb-client \
+    && docker-php-ext-install pdo_mysql mbstring opcache \
+    && rm -rf /var/lib/apt/lists/* \
     && a2enmod rewrite headers expires
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -14,4 +16,3 @@ RUN mkdir -p logs && chown -R www-data:www-data logs
 
 EXPOSE 80
 CMD ["apache2-foreground"]
-

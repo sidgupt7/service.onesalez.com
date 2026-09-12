@@ -64,8 +64,8 @@ $container->singleton(EmployeeRepository::class, static fn (Container $c): Emplo
 $container->singleton(AnalyticsRepository::class, static fn (Container $c): AnalyticsRepository => new AnalyticsRepository($c->get(AbstractDatabase::class)));
 $container->singleton(RateLimitRepository::class, static fn (Container $c): RateLimitRepository => new RateLimitRepository($c->get(AbstractDatabase::class)));
 $container->singleton(AuthService::class, static fn (Container $c): AuthService => new AuthService($c->get(AuthRepository::class), $c->get(TokenService::class), $appConfig));
-$container->singleton(LeadService::class, static fn (Container $c): LeadService => new LeadService($c->get(LeadRepository::class), $c->get(Validator::class)));
-$container->singleton(ClientService::class, static fn (Container $c): ClientService => new ClientService($c->get(ClientRepository::class), $c->get(Validator::class)));
+$container->singleton(LeadService::class, static fn (Container $c): LeadService => new LeadService($c->get(LeadRepository::class), $c->get(Validator::class), $c->get(ClientService::class)));
+$container->singleton(ClientService::class, static fn (Container $c): ClientService => new ClientService($c->get(ClientRepository::class), $c->get(Validator::class), $c->get(TicketRepository::class)));
 $container->singleton(TicketService::class, static fn (Container $c): TicketService => new TicketService($c->get(TicketRepository::class), $c->get(Validator::class)));
 $container->singleton(UserService::class, static fn (Container $c): UserService => new UserService($c->get(EmployeeRepository::class), $c->get(Validator::class)));
 $container->singleton(AnalyticsService::class, static fn (Container $c): AnalyticsService => new AnalyticsService($c->get(AnalyticsRepository::class)));
@@ -82,7 +82,7 @@ $ticketController = new TicketController($container->get(TicketService::class));
 $analyticsController = new AnalyticsController($container->get(AnalyticsService::class));
 $userController = new UserController($container->get(UserService::class));
 
-$auth = new AuthMiddleware($container->get(TokenService::class));
+$auth = new AuthMiddleware($container->get(TokenService::class), $container->get(AuthRepository::class));
 $rateLimit = new RateLimitMiddleware(
     $container->get(RateLimitRepository::class),
     $appConfig['rate_limit_requests'],
@@ -94,6 +94,13 @@ $employees = new PermissionMiddleware('employees.manage');
 $analytics = new PermissionMiddleware('analytics.view');
 
 $router = new Router();
+$router->add('DELETE', '/api/v1/customers/{id}/locations/{location_id}', [$clientController, 'removeLocation'], [$auth, $rateLimit]);
+$router->add('DELETE', '/api/v1/customers/{id}/contacts/{contact_id}', [$clientController, 'removeContact'], [$auth, $rateLimit]);
+$router->add('POST', '/api/v1/leads/{id}/convert', [$leadController, 'convert'], [$auth, $leads, $rateLimit]);
+$router->add('GET', '/api/v1/teams', [$userController, 'teams'], [$auth, $employees]);
+$router->add('PUT', '/api/v1/teams/{team_id}', [$userController, 'updateTeam'], [$auth, $employees, $rateLimit]);
+$router->add('DELETE', '/api/v1/teams/{team_id}', [$userController, 'removeTeam'], [$auth, $employees, $rateLimit]);
+$router->add('DELETE', '/api/v1/teams/{team_id}/members/{employee_id}', [$userController, 'removeTeamMember'], [$auth, $employees, $rateLimit]);
 $router->add('GET', '/api/v1/health', static fn (): \App\Http\Response => \App\Http\Response::success(['status' => 'ok']));
 $router->add('POST', '/api/v1/auth/login', [$authController, 'login'], [$rateLimit]);
 $router->add('POST', '/api/v1/auth/pin-login', [$authController, 'pinLogin'], [$rateLimit]);

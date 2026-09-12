@@ -21,7 +21,11 @@ $failed = false;
 try {
     $deadline = time() + 45;
     for ($count = 0; $count < 20 && time() < $deadline; $count++) {
-        $job = $pdo->query("SELECT * FROM email_jobs WHERE job_status='PENDING' AND available_at<=NOW(6) ORDER BY email_job_id LIMIT 1")->fetch();
+        $statement = $pdo->query("SELECT * FROM email_jobs WHERE job_status='PENDING' AND available_at<=NOW(6) ORDER BY email_job_id LIMIT 1");
+        if ($statement === false) {
+            throw new RuntimeException('Unable to read the email queue.');
+        }
+        $job = $statement->fetch();
         if ($job === false) {
             break;
         }

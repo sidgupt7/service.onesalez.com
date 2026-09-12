@@ -1,0 +1,70 @@
+name: Application quality
+on:
+  push:
+    branches: [audit-completion]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: test-root-only
+          MARIADB_DATABASE: onesalez_test
+          MARIADB_USER: audit
+          MARIADB_PASSWORD: test-only
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: onesalez_test
+      DB_USER: audit
+      DB_PASSWORD: test-only
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: 3306
+      TEST_DB_NAME: onesalez_test
+      TEST_DB_USER: audit
+      TEST_DB_PASSWORD: test-only
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
+      - uses: shivammathur/setup-php@b604ade2a87db23f8871b7182e69ec5e75effb45
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, dom, openssl
+          tools: composer:v2
+          coverage: xdebug
+      - name: Backend analysis and real database tests
+        working-directory: backend
+        run: |
+          composer install --no-interaction --prefer-dist
+          composer audit
+          php bin/migrate.php
+          php bin/migrate.php
+          composer cs
+          php -d memory_limit=512M vendor/bin/phpstan analyse --memory-limit=512M --no-progress
+          php vendor/bin/phpunit --coverage-text --coverage-clover coverage/clover.xml
+      - name: Frontend unit, build, and browser tests
+        working-directory: webapp
+        run: |
+          npm ci
+          npm audit
+          npm run check
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Build and validate the PHP container
+        run: |
+          docker build -t onesalez-backend:audit backend
+          docker run --rm onesalez-backend:audit composer check-platform-reqs --no-dev

@@ -17,6 +17,9 @@ final class TicketController extends Controller
     public function index(Request $request): Response
     {
         $result = $this->service->list($request->query, $this->actor($request));
+        if (($request->query['paginated'] ?? '') === '1') {
+            return Response::success($result);
+        }
         return Response::success($result['items'], 200, array_diff_key($result, ['items' => true]));
     }
 

@@ -36,8 +36,10 @@ final class AnalyticsRepository extends BaseRepository
                     current_employee.full_name current_employee_name,
                     completed_employee.full_name completed_by_name,
                     declined_employee.full_name declined_by_name,
-                    COUNT(DISTINCT a.attempt_id) attempt_count,
-                    GROUP_CONCAT(DISTINCT attempt_employee.full_name ORDER BY attempt_employee.full_name SEPARATOR ', ') service_employees
+                    (SELECT COUNT(*) FROM service_attempts a WHERE a.ticket_id=t.ticket_id AND a.is_deleted=FALSE) attempt_count,
+                    (SELECT GROUP_CONCAT(DISTINCT attempt_employee.full_name ORDER BY attempt_employee.full_name SEPARATOR ', ')
+                     FROM service_attempts a JOIN employees attempt_employee ON attempt_employee.employee_id=a.employee_id
+                     WHERE a.ticket_id=t.ticket_id AND a.is_deleted=FALSE) service_employees
              FROM service_tickets t
              JOIN clients c ON c.client_id=t.client_id
              JOIN client_locations l ON l.location_id=t.location_id
@@ -45,11 +47,8 @@ final class AnalyticsRepository extends BaseRepository
              LEFT JOIN employees current_employee ON current_employee.employee_id=t.current_employee_id
              LEFT JOIN employees completed_employee ON completed_employee.employee_id=t.completed_by_employee_id
              LEFT JOIN employees declined_employee ON declined_employee.employee_id=t.declined_by_employee_id
-             LEFT JOIN service_attempts a ON a.ticket_id=t.ticket_id AND a.is_deleted=FALSE
-             LEFT JOIN employees attempt_employee ON attempt_employee.employee_id=a.employee_id
              WHERE {$condition}
-             GROUP BY t.ticket_id
-             ORDER BY t.created_at DESC LIMIT {$limit} OFFSET {$offset}",
+             ORDER BY t.ticket_id DESC LIMIT {$limit} OFFSET {$offset}",
             $parameters,
         );
         return [
@@ -70,6 +69,13 @@ final class AnalyticsRepository extends BaseRepository
             't.created_at<DATE_ADD(:to_date, INTERVAL 1 DAY)',
         ];
         $parameters = ['from_date' => $filters['from'], 'to_date' => $filters['to']];
+        if (($filters['before_id'] ?? null) !== null) {
+            $where[] = 't.ticket_id<:before_id';
+            $parameters['before_id'] = $filters['before_id'];
+        }
+        if (!($filters['include_declined'] ?? false)) {
+            $where[] = "t.ticket_status<>'DECLINED'";
+        }
         if ($filters['status'] === 'PENDING') {
             $where[] = "t.ticket_status IN ('OPEN','ACCEPTED')";
         } elseif ($filters['status'] !== '') {
@@ -89,8 +95,10 @@ final class AnalyticsRepository extends BaseRepository
             $parameters['employee'] = $filters['employee_id'];
         }
         if ($filters['search'] !== '') {
-            $where[] = '(t.service_request_number LIKE :search OR t.subject LIKE :search OR t.issue_description LIKE :search)';
+            $where[] = '(t.service_request_number LIKE :search OR t.subject LIKE :search_subject OR t.issue_description LIKE :search_description)';
             $parameters['search'] = '%' . $filters['search'] . '%';
+            $parameters['search_subject'] = $parameters['search'];
+            $parameters['search_description'] = $parameters['search'];
         }
         return [implode(' AND ', $where), $parameters];
     }
@@ -110,8 +118,9 @@ final class AnalyticsRepository extends BaseRepository
         ];
     }
 
-    public function summary(string $from, string $to): array
+    public function summary(string $from, string $to, bool $includeDeclined): array
     {
+        $visibility = $includeDeclined ? '' : " AND ticket_status<>'DECLINED'";
         return $this->fetchOne(
             "SELECT COUNT(*) total,
              SUM(ticket_status='OPEN') open_count,
@@ -119,13 +128,14 @@ final class AnalyticsRepository extends BaseRepository
              SUM(ticket_status='COMPLETED') completed_count,
              SUM(ticket_status='DECLINED') declined_count,
              ROUND(AVG(CASE WHEN completed_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, created_at, completed_at) END),2) avg_resolution_minutes
-             FROM service_tickets WHERE is_deleted=FALSE AND created_at>=:from_date AND created_at<DATE_ADD(:to_date, INTERVAL 1 DAY)",
+             FROM service_tickets WHERE is_deleted=FALSE AND created_at>=:from_date AND created_at<DATE_ADD(:to_date, INTERVAL 1 DAY){$visibility}",
             ['from_date' => $from, 'to_date' => $to],
         ) ?? [];
     }
 
-    public function teamPerformance(string $from, string $to): array
+    public function teamPerformance(string $from, string $to, bool $includeDeclined): array
     {
+        $visibility = $includeDeclined ? '' : " AND t.ticket_status<>'DECLINED'";
         return $this->fetchAll(
             "SELECT e.employee_id, e.full_name, COUNT(a.attempt_id) attempts,
              SUM(a.attempt_status='COMPLETED') completed,
@@ -133,8 +143,31 @@ final class AnalyticsRepository extends BaseRepository
              ROUND(AVG(CASE WHEN a.ended_at IS NOT NULL THEN TIMESTAMPDIFF(MINUTE,a.accepted_at,a.ended_at) END),2) avg_attempt_minutes
              FROM employees e LEFT JOIN service_attempts a ON a.employee_id=e.employee_id
                AND a.accepted_at>=:from_date AND a.accepted_at<DATE_ADD(:to_date, INTERVAL 1 DAY) AND a.is_deleted=FALSE
-             WHERE e.is_deleted=FALSE GROUP BY e.employee_id ORDER BY completed DESC, attempts DESC",
+               AND EXISTS (SELECT 1 FROM service_tickets t WHERE t.ticket_id=a.ticket_id AND t.is_deleted=FALSE{$visibility})
+             WHERE e.is_deleted=FALSE GROUP BY e.employee_id,e.full_name ORDER BY completed DESC, attempts DESC",
             ['from_date' => $from, 'to_date' => $to],
+        );
+    }
+
+    public function ageing(): array
+    {
+        return $this->fetchOne(
+            "SELECT COUNT(*) pending, COALESCE(SUM(ticket_status='OPEN'),0) unassigned,
+             COALESCE(SUM(TIMESTAMPDIFF(HOUR,created_at,NOW(6))<24),0) under_day,
+             COALESCE(SUM(TIMESTAMPDIFF(HOUR,created_at,NOW(6)) BETWEEN 24 AND 71),0) one_to_three_days,
+             COALESCE(SUM(TIMESTAMPDIFF(HOUR,created_at,NOW(6))>=72),0) over_three_days
+             FROM service_tickets WHERE is_deleted=FALSE AND ticket_status IN ('OPEN','ACCEPTED')",
+        ) ?? [];
+    }
+
+    public function daily(string $from, string $to, bool $includeDeclined): array
+    {
+        $visibility = $includeDeclined ? '' : " AND ticket_status<>'DECLINED'";
+        return $this->fetchAll(
+            "SELECT DATE(created_at) date, COUNT(*) raised, SUM(ticket_status='COMPLETED') completed
+             FROM service_tickets WHERE is_deleted=FALSE AND created_at>=:from AND created_at<DATE_ADD(:to,INTERVAL 1 DAY){$visibility}
+             GROUP BY DATE(created_at) ORDER BY date",
+            ['from' => $from, 'to' => $to],
         );
     }
 }

@@ -1,7 +1,10 @@
-import type { AuthenticatedRequest, ClientDetails } from '../clients/clients-api';
+import type {
+  AuthenticatedRequest,
+  ClientDetails,
+} from "../clients/clients-api";
 
-export type TicketStatus = 'OPEN' | 'ACCEPTED' | 'COMPLETED' | 'DECLINED';
-export type TicketPriority = 'NORMAL' | 'HIGH' | 'URGENT';
+export type TicketStatus = "OPEN" | "ACCEPTED" | "COMPLETED" | "DECLINED";
+export type TicketPriority = "NORMAL" | "HIGH" | "URGENT";
 
 export interface TicketSummary {
   ticket_id: number;
@@ -33,7 +36,7 @@ export interface TicketAttempt {
 
 export interface TicketMessage {
   message_id: number;
-  author_type: 'CLIENT_CONTACT' | 'EMPLOYEE';
+  author_type: "CLIENT_CONTACT" | "EMPLOYEE";
   message: string;
   is_internal: boolean | number;
   created_at: string;
@@ -61,25 +64,61 @@ export interface CreateTicketInput {
   priority: TicketPriority;
 }
 
-export function portalClient(request: AuthenticatedRequest, clientId: number): Promise<ClientDetails> {
+export function portalClient(
+  request: AuthenticatedRequest,
+  clientId: number,
+): Promise<ClientDetails> {
   return request<ClientDetails>(`/customers/${clientId}`);
 }
 
-export function listTickets(request: AuthenticatedRequest, status = '', search = ''): Promise<TicketSummary[]> {
-  const query = new URLSearchParams({ page: '1', limit: '100' });
-  if (status) query.set('status', status);
-  if (search.trim()) query.set('search', search.trim());
-  return request<TicketSummary[]>(`/tickets?${query.toString()}`);
+export interface TicketPage {
+  items: TicketSummary[];
+  total: number;
+  page: number;
+  limit: number;
+  counts: Record<TicketStatus, number>;
 }
 
-export function ticketDetails(request: AuthenticatedRequest, id: number): Promise<TicketDetails> {
+export function listTickets(
+  request: AuthenticatedRequest,
+  status = "",
+  search = "",
+  page = 1,
+): Promise<TicketPage> {
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: "25",
+    paginated: "1",
+  });
+  if (status) query.set("status", status);
+  if (search.trim()) query.set("search", search.trim());
+  return request<TicketPage>(`/tickets?${query.toString()}`);
+}
+
+export function ticketDetails(
+  request: AuthenticatedRequest,
+  id: number,
+): Promise<TicketDetails> {
   return request<TicketDetails>(`/tickets/${id}`);
 }
 
-export function createTicket(request: AuthenticatedRequest, input: CreateTicketInput): Promise<TicketDetails> {
-  return request<TicketDetails>('/tickets', { method: 'POST', body: JSON.stringify(input) });
+export function createTicket(
+  request: AuthenticatedRequest,
+  input: CreateTicketInput,
+): Promise<TicketDetails> {
+  return request<TicketDetails>("/tickets", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
-export function updateTicketDescription(request: AuthenticatedRequest, id: number, issueDescription: string): Promise<TicketDetails> {
-  return request<TicketDetails>(`/tickets/${id}/description`, { method: 'PUT', body: JSON.stringify({ issue_description: issueDescription }) });
+export function updateTicketDescription(
+  request: AuthenticatedRequest,
+  id: number,
+  issueDescription: string,
+): Promise<TicketDetails> {
+  return request<TicketDetails>(`/tickets/${id}/description`, {
+    method: "PUT",
+    body: JSON.stringify({ issue_description: issueDescription }),
+  });
 }

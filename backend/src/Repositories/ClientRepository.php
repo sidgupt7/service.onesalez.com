@@ -9,6 +9,24 @@ use App\Utils\Input;
 
 final class ClientRepository extends BaseRepository
 {
+    public function removeLocation(int $clientId, int $locationId, string $actor): void
+    {
+        $this->database->transaction(function () use ($clientId, $locationId, $actor): void {
+            $this->execute('UPDATE client_locations SET is_active=FALSE,is_deleted=TRUE,deleted_by=:actor,deleted_at=NOW(6),updated_by=:actor WHERE client_id=:client AND location_id=:location AND is_deleted=FALSE', ['actor' => $actor, 'client' => $clientId, 'location' => $locationId]);
+            $this->execute('UPDATE client_contact_locations SET is_deleted=TRUE,deleted_by=:actor,deleted_at=NOW(6) WHERE location_id=:location AND is_deleted=FALSE', ['actor' => $actor, 'location' => $locationId]);
+        });
+    }
+
+    public function removeContact(int $clientId, int $contactId, string $actor): void
+    {
+        $this->database->transaction(function () use ($clientId, $contactId, $actor): void {
+            $this->execute('UPDATE client_contacts SET is_active=FALSE,is_deleted=TRUE,deleted_by=:actor,deleted_at=NOW(6),updated_by=:actor WHERE client_id=:client AND contact_id=:contact AND is_deleted=FALSE', ['actor' => $actor, 'client' => $clientId, 'contact' => $contactId]);
+            $this->execute("UPDATE client_user_accounts SET account_status='SUSPENDED',is_deleted=TRUE,deleted_by=:actor,deleted_at=NOW(6),updated_by=:actor WHERE contact_id=:contact AND is_deleted=FALSE", ['actor' => $actor, 'contact' => $contactId]);
+            $this->execute('UPDATE client_contact_locations SET is_deleted=TRUE,deleted_by=:actor,deleted_at=NOW(6) WHERE contact_id=:contact AND is_deleted=FALSE', ['actor' => $actor, 'contact' => $contactId]);
+            $this->revokeContactSessions($contactId);
+        });
+    }
+
     public function paginate(array $filters): array
     {
         $page = Input::positiveInt($filters['page'] ?? null, 1);
@@ -17,17 +35,19 @@ final class ClientRepository extends BaseRepository
         $where = 'c.is_deleted=FALSE';
         $params = [];
         if ($search !== '') {
-            $where .= ' AND (c.legal_name LIKE :search OR c.client_code LIKE :search OR c.gstin LIKE :search)';
+            $where .= ' AND (c.legal_name LIKE :search OR c.client_code LIKE :search_code OR c.gstin LIKE :search_gstin)';
             $params['search'] = '%' . $search . '%';
+            $params['search_code'] = $params['search'];
+            $params['search_gstin'] = $params['search'];
         }
         $total = $this->fetchOne("SELECT COUNT(*) total FROM clients c WHERE {$where}", $params);
         $offset = ($page - 1) * $limit;
         $rows = $this->fetchAll(
-            "SELECT c.*, COUNT(DISTINCT l.location_id) location_count, COUNT(DISTINCT ct.contact_id) contact_count
+            "SELECT c.*,
+                (SELECT COUNT(*) FROM client_locations l WHERE l.client_id=c.client_id AND l.is_deleted=FALSE) location_count,
+                (SELECT COUNT(*) FROM client_contacts ct WHERE ct.client_id=c.client_id AND ct.is_deleted=FALSE) contact_count
              FROM clients c
-             LEFT JOIN client_locations l ON l.client_id=c.client_id AND l.is_deleted=FALSE
-             LEFT JOIN client_contacts ct ON ct.client_id=c.client_id AND ct.is_deleted=FALSE
-             WHERE {$where} GROUP BY c.client_id ORDER BY c.legal_name LIMIT {$limit} OFFSET {$offset}",
+             WHERE {$where} ORDER BY c.legal_name, c.client_id LIMIT {$limit} OFFSET {$offset}",
             $params,
         );
         return ['items' => $rows, 'total' => (int) ($total['total'] ?? 0), 'page' => $page, 'limit' => $limit];
@@ -52,11 +72,18 @@ final class ClientRepository extends BaseRepository
              WHERE c.client_id=:id AND c.is_deleted=FALSE ORDER BY c.full_name",
             ['id' => $id],
         );
+        $assignments = $this->fetchAll(
+            'SELECT access.contact_id,access.location_id FROM client_contact_locations access
+             JOIN client_contacts contact ON contact.contact_id=access.contact_id
+             WHERE contact.client_id=:id AND access.is_deleted=FALSE',
+            ['id' => $id],
+        );
+        $byContact = [];
+        foreach ($assignments as $assignment) {
+            $byContact[$assignment['contact_id']][] = (int) $assignment['location_id'];
+        }
         foreach ($client['contacts'] as &$contact) {
-            $contact['location_ids'] = array_map('intval', array_column($this->fetchAll(
-                'SELECT location_id FROM client_contact_locations WHERE contact_id=:id AND is_deleted=FALSE',
-                ['id' => $contact['contact_id']],
-            ), 'location_id'));
+            $contact['location_ids'] = $byContact[$contact['contact_id']] ?? [];
         }
         unset($contact);
         return $client;
@@ -240,10 +267,10 @@ final class ClientRepository extends BaseRepository
                     'contact_id' => $contactId,
                     'password_hash' => $passwordHash,
                     'account_status' => $active ? 'ACTIVE' : 'SUSPENDED',
-                    'password_changed_at' => gmdate('Y-m-d H:i:s.u'),
+                    'password_changed_at' => date('Y-m-d H:i:s.u'),
                     'suspension_reason' => $active ? null : 'CLIENT SUSPENDED',
                     'suspended_by' => $active ? null : $actor,
-                    'suspended_at' => $active ? null : gmdate('Y-m-d H:i:s.u'),
+                    'suspended_at' => $active ? null : date('Y-m-d H:i:s.u'),
                     'created_by' => $actor,
                 ]);
             }
@@ -325,10 +352,10 @@ final class ClientRepository extends BaseRepository
                 'contact_id' => $contactId,
                 'password_hash' => $passwordHash,
                 'account_status' => $active ? 'ACTIVE' : 'SUSPENDED',
-                'password_changed_at' => gmdate('Y-m-d H:i:s.u'),
+                'password_changed_at' => date('Y-m-d H:i:s.u'),
                 'suspension_reason' => $suspensionReason,
                 'suspended_by' => $active ? null : $actor,
-                'suspended_at' => $active ? null : gmdate('Y-m-d H:i:s.u'),
+                'suspended_at' => $active ? null : date('Y-m-d H:i:s.u'),
                 'created_by' => $actor,
             ]);
             return;
@@ -339,6 +366,8 @@ final class ClientRepository extends BaseRepository
         if ($passwordHash !== null) {
             $changes[] = 'password_hash=:password';
             $changes[] = 'password_changed_at=NOW(6)';
+            $changes[] = 'password_reset_token_hash=NULL';
+            $changes[] = 'password_reset_expires_at=NULL';
             $changes[] = 'failed_login_attempts=0';
             $changes[] = 'locked_until=NULL';
             $parameters['password'] = $passwordHash;

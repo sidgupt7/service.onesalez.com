@@ -33,6 +33,18 @@ final class Validator
         if ($value === null || $value === '') {
             return null;
         }
+        if (str_contains($field, 'password') && (!is_string($value) || strlen($value) > 72 || str_contains($value, "\0"))) {
+            return sprintf('%s must be a string of at most 72 bytes without null characters.', $field);
+        }
+        if ($rule === 'required') {
+            if ((is_array($value) || is_object($value)) && !in_array($field, ['roles', 'ids', 'location_ids'], true)) {
+                return sprintf('%s must be a scalar value.', $field);
+            }
+            return $value === [] ? sprintf('%s is required.', $field) : null;
+        }
+        if (is_array($value) || is_object($value)) {
+            return sprintf('%s must be a scalar value.', $field);
+        }
         if ($rule === 'email' && filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
             return sprintf('%s must be a valid email address.', $field);
         }

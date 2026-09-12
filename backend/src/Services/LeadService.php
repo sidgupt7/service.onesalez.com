@@ -15,8 +15,13 @@ final class LeadService
     private const STATUSES = ['NEW', 'CONTACTED', 'QUALIFIED', 'WON', 'LOST'];
     private const FIELDS = ['business_name', 'contact_name', 'email', 'phone', 'source', 'status', 'assigned_employee_id', 'notes'];
 
-    public function __construct(private readonly LeadRepository $repository, private readonly Validator $validator)
+    public function __construct(private readonly LeadRepository $repository, private readonly Validator $validator, private readonly ClientService $clients)
     {
+    }
+
+    public function convert(int $id, array $input, Actor $actor): array
+    {
+        return $this->repository->convert($id, fn (): array => $this->clients->onboard($input, $actor), $actor->identifier());
     }
 
     public function list(array $query): array
@@ -35,7 +40,11 @@ final class LeadService
         $this->validator->validate($data, [
             'business_name' => ['required', ['max' => 200]],
             'contact_name' => ['required', ['max' => 200]],
-            'email' => ['required', 'email'],
+            'email' => ['required', 'email', ['max' => 254]],
+            'phone' => [['max' => 20]],
+            'source' => [['max' => 100]],
+            'notes' => [['max' => 10000]],
+            'assigned_employee_id' => ['integer'],
             'status' => [['in' => self::STATUSES]],
         ]);
         $id = $this->repository->create(array_intersect_key($data, array_flip(self::FIELDS)), $actor->identifier());
@@ -46,7 +55,17 @@ final class LeadService
     {
         $this->get($id);
         $data = array_intersect_key(Input::sanitize($input), array_flip(self::FIELDS));
-        $this->validator->validate($data, ['email' => ['email'], 'status' => [['in' => self::STATUSES]]]);
+        $rules = [
+            'business_name' => ['required', ['max' => 200]],
+            'contact_name' => ['required', ['max' => 200]],
+            'email' => ['required', 'email', ['max' => 254]],
+            'phone' => [['max' => 20]],
+            'source' => [['max' => 100]],
+            'notes' => [['max' => 10000]],
+            'assigned_employee_id' => ['integer'],
+            'status' => [['in' => self::STATUSES]],
+        ];
+        $this->validator->validate($data, array_intersect_key($rules, $data));
         $this->repository->update($id, $data, $actor->identifier());
         return $this->get($id);
     }

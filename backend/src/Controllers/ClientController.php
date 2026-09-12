@@ -11,6 +11,15 @@ use App\Services\ClientService;
 
 final class ClientController extends Controller
 {
+    public function removeLocation(Request $request, array $parameters): Response
+    {
+        return Response::success($this->service->removeLocation($this->id($parameters), $this->id($parameters, 'location_id'), $this->actor($request)));
+    }
+
+    public function removeContact(Request $request, array $parameters): Response
+    {
+        return Response::success($this->service->removeContact($this->id($parameters), $this->id($parameters, 'contact_id'), $this->actor($request)));
+    }
     public function __construct(private readonly ClientService $service)
     {
     }
@@ -18,6 +27,9 @@ final class ClientController extends Controller
     public function index(Request $request): Response
     {
         $result = $this->service->list($request->query, $this->actor($request));
+        if (($request->query['paginated'] ?? '') === '1') {
+            return Response::success($result);
+        }
         return Response::success($result['items'], 200, array_diff_key($result, ['items' => true]));
     }
 

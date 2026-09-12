@@ -13,8 +13,8 @@ The server receiver is installed at `/home/u606070148/.onesalez-service-deploy/r
 
 The receiver serializes deployments, backs up existing files, preserves `app/.env`, `app/logs/`, and `app/uploads/`, deploys the built bundle, and checks the live API and login HTML. A failed deployment restores the prior files. Old static assets remain available to already-open clients. `deploy-version.txt` records the deployed commit. File copies are not a fully atomic release switch; a short period of mixed files is possible during deployment.
 
-Backups are private under `/home/u606070148/.onesalez-service-deploy/backups/`. They include the server environment file, but exclude logs/uploads. They are code/configuration backups, not database backups. Review disk usage and remove obsolete backups deliberately; no automatic retention deletion is configured.
+Backups are private under `/home/u606070148/.onesalez-service-deploy/backups/`. They include the server environment file, but exclude logs/uploads. The receiver also creates a compressed database dump before migrations. Review disk usage and remove obsolete backups deliberately; no automatic retention deletion is configured.
 
-Database migrations are **not automatic**. Back up the database and apply migrations separately when a release requires them. Code rollback does not reverse database changes.
+Database migrations run automatically after a verified private database backup and before the frontend switch. The migration runner locks, checksums and journals each migration. Code rollback does not reverse database changes. Inspect partial DDL failures before using --retry-reviewed. See API_CHANGES.md for recovery details.
 
 For manual rollback, select a known-good private backup, extract it into a private temporary directory, and use administrator SSH to restore it to the exact service directory while preserving the current `.env`, logs, and uploads. Verify `/api/v1/health` and `/login` afterward. Do not deploy the repository root directly into `public_html`.

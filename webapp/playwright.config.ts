@@ -5,6 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: 'list',
   use: {
+    serviceWorkers: 'block',
     baseURL: 'http://127.0.0.1:4173',
     trace: 'on-first-retry',
   },
@@ -18,4 +19,3 @@ export default defineConfig({
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
   ],
 });
-

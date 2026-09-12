@@ -8,6 +8,27 @@ use App\Models\Actor;
 
 final class AuthRepository extends BaseRepository
 {
+    public function transaction(callable $operation): mixed
+    {
+        return $this->database->transaction($operation);
+    }
+
+    public function lockActor(string $type, int $id): void
+    {
+        $table = $type === 'CLIENT_CONTACT' ? 'client_user_accounts' : 'employee_user_accounts';
+        $key = $type === 'CLIENT_CONTACT' ? 'contact_id' : 'employee_id';
+        $this->fetchOne("SELECT account_id FROM {$table} WHERE {$key}=:id FOR UPDATE", ['id' => $id]);
+    }
+
+    public function sessionActive(Actor $actor): bool
+    {
+        return $actor->sessionId !== null && $this->fetchOne(
+            'SELECT 1 FROM auth_refresh_tokens WHERE refresh_token_id=:session AND actor_type=:type
+             AND actor_id=:id AND revoked_at IS NULL AND expires_at>NOW(6)',
+            ['session' => $actor->sessionId, 'type' => $actor->type, 'id' => $actor->id],
+        ) !== null;
+    }
+
     public function passwordHash(Actor $actor): ?string
     {
         $table = $actor->type === 'CLIENT_CONTACT' ? 'client_user_accounts' : 'employee_user_accounts';
@@ -19,16 +40,16 @@ final class AuthRepository extends BaseRepository
         return isset($account['password_hash']) ? (string) $account['password_hash'] : null;
     }
 
-    public function changePassword(Actor $actor, string $passwordHash): bool
+    public function changePassword(Actor $actor, string $passwordHash, string $previousHash): bool
     {
         $table = $actor->type === 'CLIENT_CONTACT' ? 'client_user_accounts' : 'employee_user_accounts';
         $foreignKey = $actor->type === 'CLIENT_CONTACT' ? 'contact_id' : 'employee_id';
-        return $this->database->transaction(function () use ($actor, $passwordHash, $table, $foreignKey): bool {
+        return $this->database->transaction(function () use ($actor, $passwordHash, $previousHash, $table, $foreignKey): bool {
             $updated = $this->execute(
                 "UPDATE {$table} SET password_hash=:password, password_changed_at=NOW(6),
-                 failed_login_attempts=0, locked_until=NULL, updated_by=:updated_by
-                 WHERE {$foreignKey}=:id AND is_deleted=FALSE",
-                ['password' => $passwordHash, 'updated_by' => $actor->identifier(), 'id' => $actor->id],
+                 failed_login_attempts=0, locked_until=NULL, password_reset_token_hash=NULL, password_reset_expires_at=NULL, updated_by=:updated_by
+                 WHERE {$foreignKey}=:id AND is_deleted=FALSE AND password_hash=:previous",
+                ['password' => $passwordHash, 'previous' => $previousHash, 'updated_by' => $actor->identifier(), 'id' => $actor->id],
             ) === 1;
             if ($updated) {
                 $this->execute(
@@ -109,10 +130,10 @@ final class AuthRepository extends BaseRepository
         ]);
     }
 
-    public function consumeRefreshToken(string $hash): ?array
+    public function consumeRefreshToken(string $hash, bool $lock = false): ?array
     {
         return $this->fetchOne(
-            'SELECT * FROM auth_refresh_tokens WHERE token_hash=:hash AND revoked_at IS NULL AND expires_at>NOW(6)',
+            'SELECT * FROM auth_refresh_tokens WHERE token_hash=:hash AND revoked_at IS NULL AND expires_at>NOW(6)' . ($lock ? ' FOR UPDATE' : ''),
             ['hash' => $hash],
         );
     }
@@ -149,12 +170,12 @@ final class AuthRepository extends BaseRepository
         ]);
     }
 
-    public function trustedDevice(string $deviceId, string $tokenHash): ?array
+    public function trustedDevice(string $deviceId, string $tokenHash, bool $lock = false): ?array
     {
         return $this->fetchOne(
             'SELECT * FROM auth_trusted_devices
              WHERE device_id=:device_id AND token_hash=:token_hash
-               AND revoked_at IS NULL AND expires_at>NOW(6)',
+               AND revoked_at IS NULL AND expires_at>NOW(6)' . ($lock ? ' FOR UPDATE' : ''),
             ['device_id' => $deviceId, 'token_hash' => $tokenHash],
         );
     }
@@ -163,7 +184,7 @@ final class AuthRepository extends BaseRepository
     {
         $this->execute(
             'UPDATE auth_trusted_devices SET failed_attempts=failed_attempts+1,
-             locked_until=IF(failed_attempts+1>=5, DATE_ADD(NOW(6), INTERVAL 15 MINUTE), locked_until)
+             locked_until=IF(failed_attempts>=5, DATE_ADD(NOW(6), INTERVAL 15 MINUTE), locked_until)
              WHERE trusted_device_id=:id AND revoked_at IS NULL',
             ['id' => $id],
         );
@@ -188,7 +209,7 @@ final class AuthRepository extends BaseRepository
         ) === 1;
     }
 
-    public function actor(string $type, int $id): ?Actor
+    public function actor(string $type, int $id, ?int $sessionId = null): ?Actor
     {
         if ($type === 'CLIENT_CONTACT') {
             $row = $this->fetchOne(
@@ -208,18 +229,19 @@ final class AuthRepository extends BaseRepository
                 [$row['role_code']],
                 [],
                 $row['full_name'],
+                $sessionId,
             );
         }
         $row = $this->fetchOne(
             "SELECT e.official_email, e.full_name FROM employees e JOIN employee_user_accounts a ON a.employee_id=e.employee_id
-             WHERE e.employee_id=:id AND e.is_deleted=FALSE AND a.account_status='ACTIVE' AND a.is_deleted=FALSE",
+             WHERE e.employee_id=:id AND e.is_deleted=FALSE AND e.employment_status='ACTIVE' AND a.account_status='ACTIVE' AND a.is_deleted=FALSE",
             ['id' => $id],
         );
         if ($row === null) {
             return null;
         }
         $access = $this->employeeAccess($id);
-        return new Actor($id, $type, $row['official_email'], null, $access['roles'], $access['permissions'], $row['full_name']);
+        return new Actor($id, $type, $row['official_email'], null, $access['roles'], $access['permissions'], $row['full_name'], $sessionId);
     }
 
     public function recordLogin(string $realm, int $accountId): void
@@ -233,7 +255,7 @@ final class AuthRepository extends BaseRepository
         $table = $realm === 'client' ? 'client_user_accounts' : 'employee_user_accounts';
         $this->execute(
             "UPDATE {$table} SET failed_login_attempts=failed_login_attempts+1,
-             locked_until=IF(failed_login_attempts+1>=5, DATE_ADD(NOW(6), INTERVAL 15 MINUTE), locked_until)
+             locked_until=IF(failed_login_attempts>=5, DATE_ADD(NOW(6), INTERVAL 15 MINUTE), locked_until)
              WHERE account_id=:id",
             ['id' => $accountId],
         );
@@ -241,53 +263,61 @@ final class AuthRepository extends BaseRepository
 
     public function createPasswordReset(string $email, string $realm, string $tokenHash, string $resetUrl): void
     {
-        $table = $realm === 'client' ? 'client_user_accounts' : 'employee_user_accounts';
-        $master = $realm === 'client' ? 'client_contacts' : 'employees';
-        $foreignKey = $realm === 'client' ? 'contact_id' : 'employee_id';
-        $emailColumn = $realm === 'client' ? 'email' : 'official_email';
-        $account = $this->fetchOne(
-            "SELECT a.account_id FROM {$table} a JOIN {$master} m ON m.{$foreignKey}=a.{$foreignKey}
-             WHERE LOWER(m.{$emailColumn})=LOWER(:email) AND m.is_deleted=FALSE AND a.is_deleted=FALSE",
-            ['email' => $email],
-        );
-        if ($account === null) {
-            return;
-        }
-        $this->execute(
-            "UPDATE {$table} SET password_reset_token_hash=:hash,
-             password_reset_expires_at=DATE_ADD(NOW(6), INTERVAL 30 MINUTE) WHERE account_id=:id",
-            ['hash' => $tokenHash, 'id' => $account['account_id']],
-        );
-        $this->insert('email_jobs', [
-            'recipient_email' => $email,
-            'subject' => 'Reset your ONESALEZ Service Tracker password',
-            'body' => 'Use this secure link within 30 minutes: ' . $resetUrl,
-            'created_by' => 'SYSTEM',
-        ]);
+        $this->database->transaction(function () use ($email, $realm, $tokenHash, $resetUrl): void {
+            $table = $realm === 'client' ? 'client_user_accounts' : 'employee_user_accounts';
+            $master = $realm === 'client' ? 'client_contacts' : 'employees';
+            $foreignKey = $realm === 'client' ? 'contact_id' : 'employee_id';
+            $emailColumn = $realm === 'client' ? 'email' : 'official_email';
+            $account = $this->fetchOne(
+                "SELECT a.account_id FROM {$table} a JOIN {$master} m ON m.{$foreignKey}=a.{$foreignKey}
+                 WHERE LOWER(m.{$emailColumn})=LOWER(:email) AND m.is_deleted=FALSE AND a.is_deleted=FALSE",
+                ['email' => $email],
+            );
+            if ($account === null) {
+                return;
+            }
+            $this->execute(
+                "UPDATE {$table} SET password_reset_token_hash=:hash,
+                 password_reset_expires_at=DATE_ADD(NOW(6), INTERVAL 30 MINUTE) WHERE account_id=:id",
+                ['hash' => $tokenHash, 'id' => $account['account_id']],
+            );
+            $this->insert('email_jobs', [
+                'recipient_email' => $email,
+                'subject' => 'Reset your ONESALEZ Service Tracker password',
+                'body' => 'Use this secure link within 30 minutes: ' . $resetUrl,
+                'created_by' => 'SYSTEM',
+            ]);
+        });
     }
 
     public function resetPassword(string $realm, string $tokenHash, string $passwordHash): bool
     {
         $table = $realm === 'client' ? 'client_user_accounts' : 'employee_user_accounts';
         $foreignKey = $realm === 'client' ? 'contact_id' : 'employee_id';
-        $account = $this->fetchOne(
-            "SELECT {$foreignKey} AS actor_id FROM {$table}
-             WHERE password_reset_token_hash=:token AND password_reset_expires_at>NOW(6) AND is_deleted=FALSE",
-            ['token' => $tokenHash],
-        );
-        $updated = $this->execute(
-            "UPDATE {$table} SET password_hash=:password, password_reset_token_hash=NULL,
+        return $this->database->transaction(function () use ($table, $foreignKey, $realm, $tokenHash, $passwordHash): bool {
+            $account = $this->fetchOne(
+                "SELECT {$foreignKey} AS actor_id FROM {$table}
+             WHERE password_reset_token_hash=:token AND password_reset_expires_at>NOW(6) AND is_deleted=FALSE FOR UPDATE",
+                ['token' => $tokenHash],
+            );
+            $updated = $this->execute(
+                "UPDATE {$table} SET password_hash=:password, password_reset_token_hash=NULL,
              password_reset_expires_at=NULL, password_changed_at=NOW(6), failed_login_attempts=0,
              locked_until=NULL, account_status=IF(account_status='INVITED','ACTIVE',account_status)
              WHERE password_reset_token_hash=:token AND password_reset_expires_at>NOW(6) AND is_deleted=FALSE",
-            ['password' => $passwordHash, 'token' => $tokenHash],
-        ) === 1;
-        if ($updated && $account !== null) {
-            $this->execute(
-                'UPDATE auth_trusted_devices SET revoked_at=NOW(6) WHERE actor_type=:type AND actor_id=:id AND revoked_at IS NULL',
-                ['type' => $realm === 'client' ? 'CLIENT_CONTACT' : 'EMPLOYEE', 'id' => $account['actor_id']],
-            );
-        }
-        return $updated;
+                ['password' => $passwordHash, 'token' => $tokenHash],
+            ) === 1;
+            if ($updated && $account !== null) {
+                $this->execute(
+                    'UPDATE auth_refresh_tokens SET revoked_at=NOW(6) WHERE actor_type=:type AND actor_id=:id AND revoked_at IS NULL',
+                    ['type' => $realm === 'client' ? 'CLIENT_CONTACT' : 'EMPLOYEE', 'id' => $account['actor_id']],
+                );
+                $this->execute(
+                    'UPDATE auth_trusted_devices SET revoked_at=NOW(6) WHERE actor_type=:type AND actor_id=:id AND revoked_at IS NULL',
+                    ['type' => $realm === 'client' ? 'CLIENT_CONTACT' : 'EMPLOYEE', 'id' => $account['actor_id']],
+                );
+            }
+            return $updated;
+        });
     }
 }

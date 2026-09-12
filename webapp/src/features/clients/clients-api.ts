@@ -14,7 +14,7 @@ export interface ClientLocation {
   location_id: number;
   location_code: string;
   location_name: string;
-  location_type: 'HEAD_OFFICE' | 'BRANCH' | 'WAREHOUSE' | 'OTHER';
+  location_type: "HEAD_OFFICE" | "BRANCH" | "WAREHOUSE" | "OTHER";
   address_line_1: string;
   address_line_2: string | null;
   landmark: string | null;
@@ -36,13 +36,13 @@ export interface ClientContact {
   email: string;
   mobile_number: string;
   alternate_number: string | null;
-  role_code: 'SYSTEM_OPERATOR' | 'END_USER' | 'CLIENT_ADMIN' | 'OWNER';
+  role_code: "SYSTEM_OPERATOR" | "END_USER" | "CLIENT_ADMIN" | "OWNER";
   role_name: string;
   has_all_locations: boolean | number;
   is_primary_contact: boolean | number;
   is_active: boolean | number;
   portal_enabled: boolean | number;
-  account_status: 'INVITED' | 'ACTIVE' | 'SUSPENDED' | null;
+  account_status: "INVITED" | "ACTIVE" | "SUSPENDED" | null;
   location_ids: number[];
 }
 
@@ -55,9 +55,28 @@ export interface ClientDetails extends ClientSummary {
   contacts: ClientContact[];
 }
 
-export type ClientDetailsInput = Partial<Pick<ClientDetails, 'client_code' | 'legal_name' | 'display_name' | 'gstin' | 'pan' | 'primary_email' | 'primary_phone' | 'website_url' | 'notes'>>;
-export type LocationInput = Omit<ClientLocation, 'location_id' | 'is_primary' | 'is_active'>;
-export type ContactInput = Omit<ClientContact, 'contact_id' | 'role_name' | 'is_active' | 'account_status'> & { password?: string };
+export type ClientDetailsInput = Partial<
+  Pick<
+    ClientDetails,
+    | "client_code"
+    | "legal_name"
+    | "display_name"
+    | "gstin"
+    | "pan"
+    | "primary_email"
+    | "primary_phone"
+    | "website_url"
+    | "notes"
+  >
+>;
+export type LocationInput = Omit<
+  ClientLocation,
+  "location_id" | "is_primary" | "is_active"
+>;
+export type ContactInput = Omit<
+  ClientContact,
+  "contact_id" | "role_name" | "is_active" | "account_status"
+> & { password?: string };
 
 export interface ClientOnboardingInput {
   client: {
@@ -70,7 +89,7 @@ export interface ClientOnboardingInput {
   location: {
     location_code: string;
     location_name: string;
-    location_type: 'HEAD_OFFICE' | 'BRANCH' | 'WAREHOUSE' | 'OTHER';
+    location_type: "HEAD_OFFICE" | "BRANCH" | "WAREHOUSE" | "OTHER";
     address_line_1: string;
     address_line_2?: string;
     city: string;
@@ -86,42 +105,114 @@ export interface ClientOnboardingInput {
   };
 }
 
-export type AuthenticatedRequest = <T>(path: string, options?: RequestInit) => Promise<T>;
+export type AuthenticatedRequest = <T>(
+  path: string,
+  options?: RequestInit,
+) => Promise<T>;
 
-export function listClients(request: AuthenticatedRequest, search: string): Promise<ClientSummary[]> {
-  const query = new URLSearchParams({ page: '1', limit: '50' });
-  if (search.trim()) query.set('search', search.trim());
-  return request<ClientSummary[]>(`/customers?${query.toString()}`);
+export interface ClientPage {
+  items: ClientSummary[];
+  page: number;
+  limit: number;
+  total: number;
+}
+export function listClients(
+  request: AuthenticatedRequest,
+  search: string,
+  page = 1,
+): Promise<ClientPage> {
+  const query = new URLSearchParams({
+    page: String(page),
+    limit: "25",
+    paginated: "1",
+  });
+  if (search.trim()) query.set("search", search.trim());
+  return request<ClientPage>(`/customers?${query.toString()}`);
 }
 
-export function onboardClient(request: AuthenticatedRequest, input: ClientOnboardingInput): Promise<ClientSummary> {
-  return request<ClientSummary>('/customers/onboard', { method: 'POST', body: JSON.stringify(input) });
+export function onboardClient(
+  request: AuthenticatedRequest,
+  input: ClientOnboardingInput,
+): Promise<ClientSummary> {
+  return request<ClientSummary>("/customers/onboard", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
-export function getClient(request: AuthenticatedRequest, id: number): Promise<ClientDetails> {
+export function getClient(
+  request: AuthenticatedRequest,
+  id: number,
+): Promise<ClientDetails> {
   return request<ClientDetails>(`/customers/${id}`);
 }
 
-export function updateClient(request: AuthenticatedRequest, id: number, input: ClientDetailsInput): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${id}`, { method: 'PUT', body: JSON.stringify(input) });
+export function updateClient(
+  request: AuthenticatedRequest,
+  id: number,
+  input: ClientDetailsInput,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(`/customers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
 }
 
-export function setClientActive(request: AuthenticatedRequest, id: number, active: boolean): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${id}/${active ? 'reactivate' : 'suspend'}`, { method: 'POST' });
+export function setClientActive(
+  request: AuthenticatedRequest,
+  id: number,
+  active: boolean,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(
+    `/customers/${id}/${active ? "reactivate" : "suspend"}`,
+    { method: "POST" },
+  );
 }
 
-export function saveLocation(request: AuthenticatedRequest, clientId: number, input: LocationInput, locationId?: number): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${clientId}/locations${locationId ? `/${locationId}` : ''}`, { method: locationId ? 'PUT' : 'POST', body: JSON.stringify(input) });
+export function saveLocation(
+  request: AuthenticatedRequest,
+  clientId: number,
+  input: LocationInput,
+  locationId?: number,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(
+    `/customers/${clientId}/locations${locationId ? `/${locationId}` : ""}`,
+    { method: locationId ? "PUT" : "POST", body: JSON.stringify(input) },
+  );
 }
 
-export function setLocationActive(request: AuthenticatedRequest, clientId: number, locationId: number, active: boolean): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${clientId}/locations/${locationId}/${active ? 'reactivate' : 'suspend'}`, { method: 'POST' });
+export function setLocationActive(
+  request: AuthenticatedRequest,
+  clientId: number,
+  locationId: number,
+  active: boolean,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(
+    `/customers/${clientId}/locations/${locationId}/${active ? "reactivate" : "suspend"}`,
+    { method: "POST" },
+  );
 }
 
-export function saveContact(request: AuthenticatedRequest, clientId: number, input: ContactInput, contactId?: number): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${clientId}/contacts${contactId ? `/${contactId}` : ''}`, { method: contactId ? 'PUT' : 'POST', body: JSON.stringify(input) });
+export function saveContact(
+  request: AuthenticatedRequest,
+  clientId: number,
+  input: ContactInput,
+  contactId?: number,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(
+    `/customers/${clientId}/contacts${contactId ? `/${contactId}` : ""}`,
+    { method: contactId ? "PUT" : "POST", body: JSON.stringify(input) },
+  );
 }
 
-export function setContactActive(request: AuthenticatedRequest, clientId: number, contactId: number, active: boolean): Promise<ClientDetails> {
-  return request<ClientDetails>(`/customers/${clientId}/contacts/${contactId}/${active ? 'reactivate' : 'suspend'}`, { method: 'POST' });
+export function setContactActive(
+  request: AuthenticatedRequest,
+  clientId: number,
+  contactId: number,
+  active: boolean,
+): Promise<ClientDetails> {
+  return request<ClientDetails>(
+    `/customers/${clientId}/contacts/${contactId}/${active ? "reactivate" : "suspend"}`,
+    { method: "POST" },
+  );
 }

@@ -123,15 +123,19 @@ final class UserService
 
     public function createTeam(array $input, Actor $actor): array
     {
+        $this->assertSystemAdministrator($actor);
         $data = Input::sanitize($input);
-        $this->validator->validate($data, ['team_name' => ['required', ['max' => 150]]]);
+        $this->validator->validate($data, ['team_name' => ['required', ['max' => 150]], 'description' => [['max' => 500]]]);
         $id = $this->repository->createTeam($data['team_name'], $data['description'] ?? null, $actor->identifier());
         return ['team_id' => $id, 'team_name' => $data['team_name']];
     }
 
     public function addTeamMember(int $teamId, array $input, Actor $actor): array
     {
+        $this->assertSystemAdministrator($actor);
+        $this->repository->team($teamId);
         $this->validator->validate($input, ['employee_id' => ['required', 'integer']]);
+        $this->get((int) $input['employee_id'], $actor);
         $id = $this->repository->addTeamMember(
             $teamId,
             (int) $input['employee_id'],
@@ -141,11 +145,39 @@ final class UserService
         return ['team_member_id' => $id];
     }
 
+    public function teams(Actor $actor): array
+    {
+        $this->assertSystemAdministrator($actor);
+        return $this->repository->teams();
+    }
+
+    public function updateTeam(int $id, array $input, Actor $actor): array
+    {
+        $this->assertSystemAdministrator($actor);
+        $this->repository->team($id);
+        $data = Input::sanitize($input);
+        $this->validator->validate($data, ['team_name' => ['required', ['max' => 150]], 'description' => [['max' => 500]]]);
+        $this->repository->updateTeam($id, (string) $data['team_name'], (string) ($data['description'] ?? ''), $actor->identifier());
+        return $this->repository->team($id);
+    }
+
+    public function removeTeam(int $id, Actor $actor): void
+    {
+        $this->assertSystemAdministrator($actor);
+        $this->repository->team($id);
+        $this->repository->removeTeam($id, $actor->identifier());
+    }
+
+    public function removeTeamMember(int $id, int $employeeId, Actor $actor): void
+    {
+        $this->assertSystemAdministrator($actor);
+        $this->repository->team($id);
+        $this->repository->removeTeamMember($id, $employeeId, $actor->identifier());
+    }
+
     private function registerEmployee(array $input, Actor $actor): array
     {
-        if (!$actor->can('employees.manage')) {
-            throw new AuthorizationException();
-        }
+        $this->assertSystemAdministrator($actor);
         $data = Input::sanitize($input);
         $this->validator->validate($data, [
             'employee_code' => ['required', ['max' => 30]],
@@ -166,22 +198,8 @@ final class UserService
 
     private function registerContact(array $input, Actor $actor): array
     {
-        if (!in_array('CLIENT_ADMIN', $actor->roles, true)) {
-            throw new AuthorizationException();
-        }
-        $data = Input::sanitize($input);
-        $this->validator->validate($data, [
-            'contact_role_id' => ['required', 'integer'],
-            'full_name' => ['required', ['max' => 200]],
-            'email' => ['required', 'email'],
-            'mobile_number' => ['required'],
-            'password' => ['required', ['min' => 12]],
-        ]);
-        $id = $this->repository->createClientContact(array_intersect_key($data, array_flip([
-            'contact_role_id', 'full_name', 'designation', 'email', 'mobile_number', 'alternate_number',
-            'has_all_locations', 'is_primary_contact',
-        ])), $data['password'], $actor);
-        return ['contact_id' => $id];
+        // Client contacts are provisioned through the employee-assisted client workflow.
+        throw new AuthorizationException('Use client contact management to create portal accounts.');
     }
 
     private function roles(mixed $roles): array

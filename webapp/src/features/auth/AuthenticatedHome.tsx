@@ -1,16 +1,22 @@
-import { LogOut, ShieldCheck } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { LogOut, ShieldCheck } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
-import { Button } from '../../components/ui/Button';
-import { useAuth } from './AuthProvider';
+import { Button } from "../../components/ui/Button";
+import { useAuth } from "./AuthProvider";
 
-export function AuthenticatedHome({ title, description }: { title: string; description: string }) {
+export function AuthenticatedHome({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
   const { actor, signOut } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     await signOut();
-    navigate('/login', { replace: true });
+    navigate("/login", { replace: true });
   };
 
   return (
@@ -23,19 +29,31 @@ export function AuthenticatedHome({ title, description }: { title: string; descr
               Secure session active
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">{description}</p>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">
+              {description}
+            </p>
           </div>
-          <Button onClick={handleLogout} className="gap-2 bg-transparent text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)]">
+          <Button
+            onClick={handleLogout}
+            className="gap-2 bg-transparent text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)]"
+          >
             <LogOut aria-hidden="true" className="h-4 w-4" />
             Logout
           </Button>
         </div>
         <dl className="mt-10 grid gap-4 rounded-2xl bg-[var(--surface-soft)] p-5 text-sm sm:grid-cols-2">
-          <div><dt className="text-[var(--muted)]">Signed in as</dt><dd className="mt-1 font-semibold">{actor?.email}</dd></div>
-          <div><dt className="text-[var(--muted)]">Roles</dt><dd className="mt-1 font-semibold">{actor?.roles.join(', ') || 'Standard access'}</dd></div>
+          <div>
+            <dt className="text-[var(--muted)]">Signed in as</dt>
+            <dd className="mt-1 font-semibold">{actor?.email}</dd>
+          </div>
+          <div>
+            <dt className="text-[var(--muted)]">Roles</dt>
+            <dd className="mt-1 font-semibold">
+              {actor?.roles.join(", ") || "Standard access"}
+            </dd>
+          </div>
         </dl>
       </section>
     </main>
   );
 }
-

@@ -35,35 +35,48 @@ final class AuthService
             throw new AuthenticationException('Email or password is incorrect.');
         }
 
-        $actor = $this->actorFromAccount($account, $realm);
-        $this->repository->recordLogin($realm, (int) $account['account_id']);
-        return $this->issueTokens($actor, $ip, $agent);
+        return $this->repository->transaction(function () use ($account, $realm, $ip, $agent): array {
+            $type = $realm === 'client' ? 'CLIENT_CONTACT' : 'EMPLOYEE';
+            $this->repository->lockActor($type, (int) $account['actor_id']);
+            $actor = $this->repository->actor($type, (int) $account['actor_id']);
+            if ($actor === null || $this->repository->passwordHash($actor) !== $account['password_hash']) {
+                throw new AuthenticationException('The account changed while signing in. Please try again.');
+            }
+            $this->repository->recordLogin($realm, (int) $account['account_id']);
+            return $this->issueTokens($actor, $ip, $agent);
+        });
     }
 
     public function enrollTrustedDevice(Actor $actor, string $pin, string $deviceName, string $ip, ?string $agent): array
     {
-        $deviceId = bin2hex(random_bytes(16));
-        $deviceToken = $this->tokens->opaqueToken();
-        $expiresAtTimestamp = time() + $this->config['trusted_device_ttl'];
-        $expiresAt = gmdate('Y-m-d H:i:s.u', $expiresAtTimestamp);
-        $this->repository->createTrustedDevice(
-            $actor,
-            $deviceId,
-            $deviceName,
-            $this->tokens->hashOpaqueToken($deviceToken),
-            password_hash($pin, PASSWORD_BCRYPT, ['cost' => 12]),
-            $expiresAt,
-            $ip,
-            $agent,
-        );
+        return $this->repository->transaction(function () use ($actor, $pin, $deviceName, $ip, $agent): array {
+            $this->repository->lockActor($actor->type, $actor->id);
+            if (!$this->repository->sessionActive($actor) || $this->repository->actor($actor->type, $actor->id) === null) {
+                throw new AuthenticationException('Sign in again before enabling PIN login.');
+            }
+            $deviceId = bin2hex(random_bytes(16));
+            $deviceToken = $this->tokens->opaqueToken();
+            $expiresAtTimestamp = time() + $this->config['trusted_device_ttl'];
+            $expiresAt = (new \DateTimeImmutable('@' . $expiresAtTimestamp))->setTimezone(new \DateTimeZone('Asia/Kolkata'))->format('Y-m-d H:i:s.u');
+            $this->repository->createTrustedDevice(
+                $actor,
+                $deviceId,
+                $deviceName,
+                $this->tokens->hashOpaqueToken($deviceToken),
+                password_hash($pin, PASSWORD_BCRYPT, ['cost' => 12]),
+                $expiresAt,
+                $ip,
+                $agent,
+            );
 
-        return [
+            return [
             'device_id' => $deviceId,
             'device_token' => $deviceToken,
             'device_name' => $deviceName,
             'expires_at' => gmdate(DATE_ATOM, $expiresAtTimestamp),
             'actor' => $actor,
-        ];
+            ];
+        });
     }
 
     public function pinLogin(string $deviceId, string $deviceToken, string $pin, string $ip, ?string $agent): array
@@ -83,12 +96,16 @@ final class AuthService
             throw new AuthenticationException('The PIN is incorrect.');
         }
 
-        $actor = $this->repository->actor((string) $device['actor_type'], (int) $device['actor_id']);
-        if ($actor === null) {
-            throw new AuthenticationException('This account is no longer available.');
-        }
-        $this->repository->recordTrustedDeviceLogin((int) $device['trusted_device_id'], $ip, $agent);
-        return $this->issueTokens($actor, $ip, $agent);
+        return $this->repository->transaction(function () use ($device, $deviceId, $deviceToken, $ip, $agent): array {
+            $this->repository->lockActor((string) $device['actor_type'], (int) $device['actor_id']);
+            $fresh = $this->repository->trustedDevice($deviceId, $this->tokens->hashOpaqueToken($deviceToken), true);
+            $actor = $this->repository->actor((string) $device['actor_type'], (int) $device['actor_id']);
+            if ($fresh === null || $actor === null || $this->isLocked($fresh['locked_until'])) {
+                throw new AuthenticationException('Quick login is no longer available. Sign in with your password.');
+            }
+            $this->repository->recordTrustedDeviceLogin((int) $device['trusted_device_id'], $ip, $agent);
+            return $this->issueTokens($actor, $ip, $agent);
+        });
     }
 
     public function revokeTrustedDevice(Actor $actor, string $deviceId): void
@@ -98,22 +115,29 @@ final class AuthService
 
     public function refresh(string $refreshToken, string $ip, ?string $agent): array
     {
-        $stored = $this->repository->consumeRefreshToken($this->tokens->hashOpaqueToken($refreshToken));
-        if ($stored === null) {
-            throw new AuthenticationException('The refresh token is invalid or expired.');
-        }
-        $actor = $this->repository->actor((string) $stored['actor_type'], (int) $stored['actor_id']);
-        if ($actor === null) {
-            throw new AuthenticationException('The account is no longer active.');
-        }
+        return $this->repository->transaction(function () use ($refreshToken, $ip, $agent): array {
+            $stored = $this->repository->consumeRefreshToken($this->tokens->hashOpaqueToken($refreshToken));
+            if ($stored === null) {
+                throw new AuthenticationException('The refresh token is invalid or expired.');
+            }
+            $this->repository->lockActor((string) $stored['actor_type'], (int) $stored['actor_id']);
+            $stored = $this->repository->consumeRefreshToken($this->tokens->hashOpaqueToken($refreshToken), true);
+            if ($stored === null) {
+                throw new AuthenticationException('The refresh token has already been used.');
+            }
+            $actor = $this->repository->actor((string) $stored['actor_type'], (int) $stored['actor_id']);
+            if ($actor === null) {
+                throw new AuthenticationException('The account is no longer active.');
+            }
 
-        $new = $this->issueTokens($actor, $ip, $agent);
-        $newStored = $this->repository->consumeRefreshToken($this->tokens->hashOpaqueToken($new['refresh_token']));
-        $this->repository->revokeRefreshToken(
-            (int) $stored['refresh_token_id'],
-            $newStored === null ? null : (int) $newStored['refresh_token_id'],
-        );
-        return $new;
+            $new = $this->issueTokens($actor, $ip, $agent);
+            $newStored = $this->repository->consumeRefreshToken($this->tokens->hashOpaqueToken($new['refresh_token']));
+            $this->repository->revokeRefreshToken(
+                (int) $stored['refresh_token_id'],
+                $newStored === null ? null : (int) $newStored['refresh_token_id'],
+            );
+            return $new;
+        });
     }
 
     public function logout(string $refreshToken): void
@@ -162,6 +186,7 @@ final class AuthService
             !$this->repository->changePassword(
                 $actor,
                 password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]),
+                $currentHash,
             )
         ) {
             throw new AuthenticationException('The account is no longer available.');
@@ -171,33 +196,20 @@ final class AuthService
     private function issueTokens(Actor $actor, string $ip, ?string $agent): array
     {
         $refresh = $this->tokens->opaqueToken();
-        $this->repository->createRefreshToken(
+        $sessionId = $this->repository->createRefreshToken(
             $actor,
             $this->tokens->hashOpaqueToken($refresh),
-            gmdate('Y-m-d H:i:s.u', time() + $this->config['jwt_refresh_ttl']),
+            (new \DateTimeImmutable('@' . (time() + $this->config['jwt_refresh_ttl'])))->setTimezone(new \DateTimeZone('Asia/Kolkata'))->format('Y-m-d H:i:s.u'),
             $ip,
             $agent,
         );
         return [
-            'access_token' => $this->tokens->accessToken($actor),
+            'access_token' => $this->tokens->accessToken($actor, $sessionId),
             'refresh_token' => $refresh,
             'token_type' => 'Bearer',
             'expires_in' => $this->config['jwt_access_ttl'],
             'actor' => $actor,
         ];
-    }
-
-    private function actorFromAccount(array $account, string $realm): Actor
-    {
-        return new Actor(
-            (int) $account['actor_id'],
-            $realm === 'client' ? 'CLIENT_CONTACT' : 'EMPLOYEE',
-            (string) $account['email'],
-            isset($account['client_id']) ? (int) $account['client_id'] : null,
-            $realm === 'client' ? [(string) $account['role_code']] : $account['roles'],
-            $realm === 'client' ? [] : $account['permissions'],
-            isset($account['full_name']) ? (string) $account['full_name'] : null,
-        );
     }
 
     private function isLocked(mixed $lockedUntil): bool

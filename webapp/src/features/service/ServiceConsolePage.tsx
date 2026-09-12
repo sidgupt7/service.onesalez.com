@@ -1,63 +1,801 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Building2, CheckCircle2, Clock3, KeyRound, LogOut, MessageSquare, RefreshCw, Search, Send, ShieldAlert, UserRoundCheck, Wrench, X } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useDialog } from "../../lib/use-dialog";
+import { formatServiceDate } from "../../lib/date";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  Building2,
+  CheckCircle2,
+  Clock3,
+  KeyRound,
+  LogOut,
+  MessageSquare,
+  RefreshCw,
+  Search,
+  Send,
+  ShieldAlert,
+  UserRoundCheck,
+  Wrench,
+  X,
+} from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { Button } from '../../components/ui/Button';
-import { Input } from '../../components/ui/Input';
-import { ApiError } from '../../lib/api';
-import { useAuth } from '../auth/AuthProvider';
-import { ChangePasswordDialog } from '../auth/ChangePasswordDialog';
-import { listTickets, ticketDetails, type TicketDetails, type TicketPriority, type TicketStatus, type TicketSummary } from '../portal/portal-api';
-import { addTicketMessage, changePriority, transitionTicket, type TicketAction } from './service-api';
+import { Pagination } from "../../components/ui/Pagination";
+import { useDebounced } from "../../lib/use-debounced";
+import { Button } from "../../components/ui/Button";
+import { Input } from "../../components/ui/Input";
+import { ApiError } from "../../lib/api";
+import { useAuth } from "../auth/AuthProvider";
+import { ChangePasswordDialog } from "../auth/ChangePasswordDialog";
+import {
+  listTickets,
+  ticketDetails,
+  type TicketDetails,
+  type TicketPriority,
+  type TicketStatus,
+  type TicketSummary,
+} from "../portal/portal-api";
+import {
+  addTicketMessage,
+  changePriority,
+  transitionTicket,
+  type TicketAction,
+} from "./service-api";
 
-const coreStatuses: Array<{ status: TicketStatus; label: string }> = [{ status: 'OPEN', label: 'Open' }, { status: 'ACCEPTED', label: 'Accepted' }, { status: 'COMPLETED', label: 'Completed' }];
+const coreStatuses: Array<{ status: TicketStatus; label: string }> = [
+  { status: "OPEN", label: "Open" },
+  { status: "ACCEPTED", label: "Accepted" },
+  { status: "COMPLETED", label: "Completed" },
+];
 
 export function ServiceConsolePage() {
   const { actor, authenticatedRequest, signOut } = useAuth();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<TicketStatus>('OPEN');
-  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<TicketStatus>("OPEN");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const debouncedSearch = useDebounced(search);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const canDecline = Boolean(actor?.roles.includes('SYSTEM_ADMIN') || actor?.permissions.includes('tickets.decline'));
-  const statuses = canDecline ? [...coreStatuses, { status: 'DECLINED' as TicketStatus, label: 'Declined' }] : coreStatuses;
-  const tickets = useQuery({ queryKey: ['service-tickets'], queryFn: () => listTickets(authenticatedRequest), refetchInterval: 15_000, staleTime: 5_000 });
-  const detail = useQuery({ queryKey: ['service-ticket', selectedId], queryFn: () => ticketDetails(authenticatedRequest, selectedId || 0), enabled: selectedId !== null, refetchInterval: 15_000 });
-  const visible = useMemo(() => (tickets.data || []).filter((ticket) => ticket.ticket_status === status && `${ticket.service_request_number} ${ticket.subject} ${ticket.client_name || ''} ${ticket.location_name}`.toLowerCase().includes(search.toLowerCase())), [tickets.data, status, search]);
-  const logout = async () => { await signOut(); navigate('/login', { replace: true }); };
+  const canDecline = Boolean(
+    actor?.roles.includes("SYSTEM_ADMIN") ||
+    actor?.permissions.includes("tickets.decline"),
+  );
+  const statuses = canDecline
+    ? [
+        ...coreStatuses,
+        { status: "DECLINED" as TicketStatus, label: "Declined" },
+      ]
+    : coreStatuses;
+  const tickets = useQuery({
+    queryKey: ["service-tickets", status, debouncedSearch, page],
+    queryFn: () =>
+      listTickets(authenticatedRequest, status, debouncedSearch, page),
+    refetchInterval: 15_000,
+    staleTime: 5_000,
+  });
+  const detail = useQuery({
+    queryKey: ["service-ticket", selectedId],
+    queryFn: () => ticketDetails(authenticatedRequest, selectedId || 0),
+    enabled: selectedId !== null,
+    refetchInterval: 15_000,
+  });
+  const visible = tickets.data?.items || [];
+  const logout = async () => {
+    await signOut();
+    navigate("/login", { replace: true });
+  };
 
-  return <main className="min-h-screen bg-[var(--canvas)] text-[var(--text)]"><header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color:var(--surface)]/95 backdrop-blur"><div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-4 py-3 sm:px-6"><div className="flex items-center gap-3"><img src="/onesalez-logo.png" alt="ONESALEZ" className="h-10 w-10 rounded-xl object-contain" /><div><p className="text-sm font-bold">ONESALEZ SERVICE CONSOLE</p><p className="text-[10px] uppercase text-[var(--muted)]">Shared operational queue</p></div></div><div className="flex items-center gap-2"><Button onClick={() => navigate('/admin/clients')} className="hidden h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)] sm:flex"><Building2 className="mr-1.5 h-4 w-4" />Clients</Button><Button onClick={() => setPasswordOpen(true)} className="hidden h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)] sm:flex"><KeyRound className="mr-1.5 h-4 w-4" />Password</Button><button type="button" onClick={() => tickets.refetch()} aria-label="Refresh tickets" className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] text-[var(--muted)]"><RefreshCw className={`h-4 w-4 ${tickets.isFetching ? 'animate-spin' : ''}`} /></button><Button onClick={logout} className="h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)]"><LogOut className="mr-1.5 h-4 w-4" />Logout</Button></div></div></header><div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6"><div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--brand)]">Live service desk</p><h1 className="mt-1 text-2xl font-bold">Tickets</h1><p className="mt-1 text-sm text-[var(--muted)]">Signed in as {actor?.displayName || actor?.email}</p></div><label className="relative w-full sm:max-w-sm"><Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search number, client, site, subject" className="pl-10" /></label></div><div className="mb-5 grid grid-cols-3 gap-2 sm:flex">{statuses.map((item) => { const count = (tickets.data || []).filter((ticket) => ticket.ticket_status === item.status).length; return <button key={item.status} type="button" onClick={() => { setStatus(item.status); setSelectedId(null); }} className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${status === item.status ? 'bg-[var(--brand)] text-white shadow-sm' : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]'}`}>{item.label}<span className={`rounded-full px-2 py-0.5 text-[10px] ${status === item.status ? 'bg-white/15' : 'bg-[var(--surface-soft)]'}`}>{count}</span></button>; })}</div>{selectedId === null ? <TicketQueue tickets={visible} loading={tickets.isLoading} onSelect={setSelectedId} /> : <EmployeeTicketWorkspace ticket={detail.data} loading={detail.isLoading} onBack={() => setSelectedId(null)} canDecline={canDecline} />}</div>{passwordOpen && <ChangePasswordDialog onClose={() => setPasswordOpen(false)} />}</main>;
+  return (
+    <main className="min-h-screen bg-[var(--canvas)] text-[var(--text)]">
+      <header className="sticky top-0 z-30 border-b border-[var(--border)] bg-[color:var(--surface)]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <img
+              src="/onesalez-logo.png"
+              alt="ONESALEZ"
+              className="h-10 w-10 rounded-xl object-contain"
+            />
+            <div>
+              <p className="text-sm font-bold">ONESALEZ SERVICE CONSOLE</p>
+              <p className="text-[10px] uppercase text-[var(--muted)]">
+                Shared operational queue
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => navigate("/admin")} className="h-9 px-3">
+              Workspace
+            </Button>
+            <Button
+              onClick={() => navigate("/admin/clients")}
+              className="hidden h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)] sm:flex"
+            >
+              <Building2 className="mr-1.5 h-4 w-4" />
+              Clients
+            </Button>
+            <Button
+              onClick={() => setPasswordOpen(true)}
+              className="hidden h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)] sm:flex"
+            >
+              <KeyRound className="mr-1.5 h-4 w-4" />
+              Password
+            </Button>
+            <button
+              type="button"
+              onClick={() => tickets.refetch()}
+              aria-label="Refresh tickets"
+              className="grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] text-[var(--muted)]"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${tickets.isFetching ? "animate-spin" : ""}`}
+              />
+            </button>
+            <Button
+              onClick={logout}
+              className="h-9 bg-transparent px-3 text-[var(--brand)] shadow-none ring-1 ring-[var(--border)] hover:bg-[var(--surface-soft)]"
+            >
+              <LogOut className="mr-1.5 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </header>
+      <div className="mx-auto max-w-[1500px] px-4 py-6 sm:px-6">
+        <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-[var(--brand)]">
+              Live service desk
+            </p>
+            <h1 className="mt-1 text-2xl font-bold">Tickets</h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Signed in as {actor?.displayName || actor?.email}
+            </p>
+          </div>
+          <label className="relative w-full sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+            <Input
+              value={search}
+              aria-label="Search tickets"
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Search number, client, site, subject"
+              className="pl-10"
+            />
+          </label>
+        </div>
+        <div className="mb-5 grid grid-cols-3 gap-2 sm:flex">
+          {statuses.map((item) => {
+            const count = tickets.data?.counts[item.status] ?? 0;
+            return (
+              <button
+                key={item.status}
+                type="button"
+                onClick={() => {
+                  setStatus(item.status);
+                  setPage(1);
+                  setSelectedId(null);
+                }}
+                className={`flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition ${status === item.status ? "bg-[var(--brand)] text-white shadow-sm" : "border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"}`}
+              >
+                {item.label}
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] ${status === item.status ? "bg-white/15" : "bg-[var(--surface-soft)]"}`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {(tickets.isError || detail.isError) && (
+          <p role="alert" className="mb-4 text-red-700">
+            {(tickets.error || detail.error)?.message ||
+              "Could not load tickets."}
+          </p>
+        )}
+        {selectedId === null ? (
+          <TicketQueue
+            tickets={visible}
+            loading={tickets.isLoading}
+            onSelect={setSelectedId}
+          />
+        ) : (
+          <EmployeeTicketWorkspace
+            ticket={detail.data}
+            loading={detail.isLoading}
+            onBack={() => setSelectedId(null)}
+            canDecline={canDecline}
+          />
+        )}
+        {selectedId === null && tickets.data && (
+          <Pagination
+            page={page}
+            limit={tickets.data.limit}
+            total={tickets.data.total}
+            pending={tickets.isFetching}
+            onPage={setPage}
+          />
+        )}
+      </div>
+      {passwordOpen && (
+        <ChangePasswordDialog onClose={() => setPasswordOpen(false)} />
+      )}
+    </main>
+  );
 }
 
-function TicketQueue({ tickets, loading, onSelect }: { tickets: TicketSummary[]; loading: boolean; onSelect: (id: number) => void }) {
-  if (loading) return <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center text-sm text-[var(--muted)]">Loading live tickets…</div>;
-  if (tickets.length === 0) return <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center"><CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" /><p className="mt-3 font-semibold">No tickets in this queue</p></div>;
-  return <div className="grid gap-3">{tickets.map((ticket) => <button key={ticket.ticket_id} type="button" onClick={() => onSelect(ticket.ticket_id)} className="grid w-full gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left shadow-sm transition hover:border-[var(--brand)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-bold text-[var(--brand)]">{ticket.service_request_number}</span><PriorityBadge priority={ticket.priority} /><span className="text-xs text-[var(--muted)]">{formatDate(ticket.created_at)}</span></div><h2 className="mt-2 truncate font-semibold">{ticket.subject}</h2><p className="mt-1 truncate text-xs text-[var(--muted)]">{ticket.client_name} · {ticket.location_name}</p></div><div className="text-xs text-[var(--muted)] sm:text-right">{ticket.current_employee_name ? <><p className="font-semibold text-[var(--text)]">{ticket.current_employee_name}</p><p>Assigned employee</p></> : <p className="font-semibold text-blue-700">Waiting for acceptance</p>}</div></button>)}</div>;
+function TicketQueue({
+  tickets,
+  loading,
+  onSelect,
+}: {
+  tickets: TicketSummary[];
+  loading: boolean;
+  onSelect: (id: number) => void;
+}) {
+  if (loading)
+    return (
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center text-sm text-[var(--muted)]">
+        Loading live tickets…
+      </div>
+    );
+  if (tickets.length === 0)
+    return (
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center">
+        <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
+        <p className="mt-3 font-semibold">No tickets in this queue</p>
+      </div>
+    );
+  return (
+    <div className="grid gap-3">
+      {tickets.map((ticket) => (
+        <button
+          key={ticket.ticket_id}
+          type="button"
+          onClick={() => onSelect(ticket.ticket_id)}
+          className="grid w-full gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left shadow-sm transition hover:border-[var(--brand)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5"
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold text-[var(--brand)]">
+                {ticket.service_request_number}
+              </span>
+              <PriorityBadge priority={ticket.priority} />
+              <span className="text-xs text-[var(--muted)]">
+                {formatDate(ticket.created_at)}
+              </span>
+            </div>
+            <h2 className="mt-2 truncate font-semibold">{ticket.subject}</h2>
+            <p className="mt-1 truncate text-xs text-[var(--muted)]">
+              {ticket.client_name} · {ticket.location_name}
+            </p>
+          </div>
+          <div className="text-xs text-[var(--muted)] sm:text-right">
+            {ticket.current_employee_name ? (
+              <>
+                <p className="font-semibold text-[var(--text)]">
+                  {ticket.current_employee_name}
+                </p>
+                <p>Assigned employee</p>
+              </>
+            ) : (
+              <p className="font-semibold text-blue-700">
+                Waiting for acceptance
+              </p>
+            )}
+          </div>
+        </button>
+      ))}
+    </div>
+  );
 }
 
-function EmployeeTicketWorkspace({ ticket, loading, onBack, canDecline }: { ticket: TicketDetails | undefined; loading: boolean; onBack: () => void; canDecline: boolean }) {
+function EmployeeTicketWorkspace({
+  ticket,
+  loading,
+  onBack,
+  canDecline,
+}: {
+  ticket: TicketDetails | undefined;
+  loading: boolean;
+  onBack: () => void;
+  canDecline: boolean;
+}) {
   const { actor, authenticatedRequest } = useAuth();
   const queryClient = useQueryClient();
   const [action, setAction] = useState<TicketAction | null>(null);
-  const [note, setNote] = useState('');
-  const [message, setMessage] = useState('');
+  const [note, setNote] = useState("");
+  const [message, setMessage] = useState("");
   const [internal, setInternal] = useState(false);
-  const refresh = async (updated: TicketDetails) => { queryClient.setQueryData(['service-ticket', updated.ticket_id], updated); await queryClient.invalidateQueries({ queryKey: ['service-tickets'] }); };
-  const transition = useMutation({ mutationFn: ({ selectedAction, actionNote }: { selectedAction: TicketAction; actionNote: string }) => transitionTicket(authenticatedRequest, ticket?.ticket_id || 0, selectedAction, actionNote), onSuccess: async (updated) => { await refresh(updated); setAction(null); setNote(''); } });
-  const priority = useMutation({ mutationFn: (value: TicketPriority) => changePriority(authenticatedRequest, ticket?.ticket_id || 0, value), onSuccess: refresh });
-  const sendMessage = useMutation({ mutationFn: () => addTicketMessage(authenticatedRequest, ticket?.ticket_id || 0, message, internal), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ['service-ticket', ticket?.ticket_id] }); setMessage(''); setInternal(false); } });
-  if (loading || !ticket) return <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center text-sm text-[var(--muted)]">Loading ticket workspace…</div>;
+  const refresh = async (updated: TicketDetails) => {
+    queryClient.setQueryData(["service-ticket", updated.ticket_id], updated);
+    await queryClient.invalidateQueries({ queryKey: ["service-tickets"] });
+  };
+  const transition = useMutation({
+    mutationFn: ({
+      selectedAction,
+      actionNote,
+    }: {
+      selectedAction: TicketAction;
+      actionNote: string;
+    }) =>
+      transitionTicket(
+        authenticatedRequest,
+        ticket?.ticket_id || 0,
+        selectedAction,
+        actionNote,
+      ),
+    onSuccess: async (updated) => {
+      await refresh(updated);
+      setAction(null);
+      setNote("");
+    },
+  });
+  const priority = useMutation({
+    mutationFn: (value: TicketPriority) =>
+      changePriority(authenticatedRequest, ticket?.ticket_id || 0, value),
+    onSuccess: refresh,
+  });
+  const sendMessage = useMutation({
+    mutationFn: () =>
+      addTicketMessage(
+        authenticatedRequest,
+        ticket?.ticket_id || 0,
+        message,
+        internal,
+      ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["service-ticket", ticket?.ticket_id],
+      });
+      setMessage("");
+      setInternal(false);
+    },
+  });
+  if (!loading && !ticket)
+    return <Button onClick={onBack}>Back to queue</Button>;
+  if (loading || !ticket)
+    return (
+      <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-16 text-center text-sm text-[var(--muted)]">
+        Loading ticket workspace…
+      </div>
+    );
   const mine = ticket.current_employee_id === actor?.id;
-  const beginAction = (selected: TicketAction) => { if (selected === 'accept') transition.mutate({ selectedAction: selected, actionNote: '' }); else { setAction(selected); setNote(''); } };
-  const error = transition.error instanceof ApiError ? transition.error.message : priority.error instanceof ApiError ? priority.error.message : null;
-  return <section><button type="button" onClick={onBack} className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--brand)]"><ArrowLeft className="h-4 w-4" />Back to queue</button><div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.75fr)]"><div className="space-y-5"><TicketMain ticket={ticket} mine={mine} canDecline={canDecline} transitionPending={transition.isPending} priorityPending={priority.isPending} error={error} onAction={beginAction} onPriority={(value) => priority.mutate(value)} /><Attempts ticket={ticket} /></div><Conversation ticket={ticket} message={message} internal={internal} pending={sendMessage.isPending} error={sendMessage.isError} setMessage={setMessage} setInternal={setInternal} onSubmit={(event) => { event.preventDefault(); sendMessage.mutate(); }} /></div>{action && <ActionDialog action={action as Exclude<TicketAction, 'accept'>} note={note} setNote={setNote} pending={transition.isPending} error={transition.error} onClose={() => setAction(null)} onSubmit={() => transition.mutate({ selectedAction: action, actionNote: note })} />}</section>;
+  const beginAction = (selected: TicketAction) => {
+    if (selected === "accept")
+      transition.mutate({ selectedAction: selected, actionNote: "" });
+    else {
+      setAction(selected);
+      setNote("");
+    }
+  };
+  const error =
+    transition.error instanceof ApiError
+      ? transition.error.message
+      : priority.error instanceof ApiError
+        ? priority.error.message
+        : null;
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-4 flex items-center gap-2 text-sm font-semibold text-[var(--brand)]"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to queue
+      </button>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.75fr)]">
+        <div className="space-y-5">
+          <TicketMain
+            ticket={ticket}
+            mine={mine}
+            canDecline={canDecline}
+            transitionPending={transition.isPending}
+            priorityPending={priority.isPending}
+            error={error}
+            onAction={beginAction}
+            onPriority={(value) => priority.mutate(value)}
+          />
+          <Attempts ticket={ticket} />
+        </div>
+        <Conversation
+          ticket={ticket}
+          message={message}
+          internal={internal}
+          pending={sendMessage.isPending}
+          error={sendMessage.isError}
+          setMessage={setMessage}
+          setInternal={setInternal}
+          onSubmit={(event) => {
+            event.preventDefault();
+            sendMessage.mutate();
+          }}
+        />
+      </div>
+      {action && (
+        <ActionDialog
+          action={action as Exclude<TicketAction, "accept">}
+          note={note}
+          setNote={setNote}
+          pending={transition.isPending}
+          error={transition.error}
+          onClose={() => setAction(null)}
+          onSubmit={() =>
+            transition.mutate({ selectedAction: action, actionNote: note })
+          }
+        />
+      )}
+    </section>
+  );
 }
 
-function TicketMain({ ticket, mine, canDecline, transitionPending, priorityPending, error, onAction, onPriority }: { ticket: TicketDetails; mine: boolean; canDecline: boolean; transitionPending: boolean; priorityPending: boolean; error: string | null; onAction: (action: TicketAction) => void; onPriority: (priority: TicketPriority) => void }) { return <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-7"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-bold text-[var(--brand)]">{ticket.service_request_number}</h2><StatusBadge status={ticket.ticket_status} /></div><h3 className="mt-2 text-lg font-semibold">{ticket.subject}</h3><p className="mt-1 text-xs text-[var(--muted)]">{ticket.client_name} · {ticket.location_name} · {ticket.reported_by_name}</p></div><select value={ticket.priority} onChange={(event) => onPriority(event.target.value as TicketPriority)} disabled={priorityPending} className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-bold uppercase"><option value="NORMAL">Normal priority</option><option value="HIGH">High priority</option><option value="URGENT">Urgent priority</option></select></div><div className="mt-6 rounded-2xl bg-[var(--surface-soft)] p-4"><p className="text-xs font-bold uppercase text-[var(--muted)]">Problem description</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6">{ticket.issue_description}</p></div>{ticket.final_resolution && <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-emerald-950"><p className="text-xs font-bold uppercase">Final resolution</p><p className="mt-2 text-sm">{ticket.final_resolution}</p></div>}{error && <div role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</div>}<div className="mt-5 flex flex-wrap gap-2">{ticket.ticket_status === 'OPEN' && <Button disabled={transitionPending} onClick={() => onAction('accept')}><UserRoundCheck className="mr-2 h-4 w-4" />Accept ticket</Button>}{ticket.ticket_status === 'ACCEPTED' && mine && <><Button onClick={() => onAction('complete')} className="bg-emerald-600 hover:bg-emerald-700"><CheckCircle2 className="mr-2 h-4 w-4" />Complete</Button><Button onClick={() => onAction('release')} className="bg-amber-600 hover:bg-amber-700"><Clock3 className="mr-2 h-4 w-4" />Release</Button></>}{ticket.ticket_status === 'ACCEPTED' && !mine && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Accepted by {ticket.current_employee_name}. Only that employee can release or complete it.</p>}{canDecline && !['COMPLETED','DECLINED'].includes(ticket.ticket_status) && <Button onClick={() => onAction('decline')} className="bg-red-600 hover:bg-red-700"><ShieldAlert className="mr-2 h-4 w-4" />Decline</Button>}</div></article>; }
-function Attempts({ ticket }: { ticket: TicketDetails }) { return <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-7"><h3 className="flex items-center gap-2 font-bold"><Wrench className="h-4 w-4 text-[var(--brand)]" />Service attempts</h3>{ticket.attempts.length === 0 ? <p className="mt-4 text-sm text-[var(--muted)]">No employee has attempted this ticket yet.</p> : <div className="mt-4 space-y-3">{ticket.attempts.map((attempt) => <div key={attempt.attempt_id} className="rounded-xl bg-[var(--surface-soft)] p-3"><div className="flex flex-wrap justify-between gap-2 text-sm"><span className="font-semibold">Attempt {attempt.attempt_number} · {attempt.employee_name}</span><span className="text-[10px] font-bold uppercase text-[var(--muted)]">{attempt.attempt_status}</span></div><p className="mt-1 text-xs text-[var(--muted)]">Accepted {formatDate(attempt.accepted_at)}</p>{attempt.service_note && <p className="mt-2 text-sm leading-5">{attempt.service_note}</p>}</div>)}</div>}</article>; }
-function Conversation({ ticket, message, internal, pending, error, setMessage, setInternal, onSubmit }: { ticket: TicketDetails; message: string; internal: boolean; pending: boolean; error: boolean; setMessage: (value: string) => void; setInternal: (value: boolean) => void; onSubmit: (event: FormEvent) => void }) { return <aside className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6"><h3 className="flex items-center gap-2 font-bold"><MessageSquare className="h-4 w-4 text-[var(--brand)]" />Conversation and notes</h3><div className="mt-4 max-h-[440px] space-y-3 overflow-y-auto">{ticket.messages.length === 0 ? <p className="py-8 text-center text-sm text-[var(--muted)]">No messages yet.</p> : ticket.messages.map((item) => <div key={item.message_id} className={`rounded-xl p-3 text-sm ${Boolean(item.is_internal) ? 'border border-amber-200 bg-amber-50 text-amber-950' : item.author_type === 'EMPLOYEE' ? 'bg-blue-50 text-blue-950' : 'bg-[var(--surface-soft)]'}`}><div className="mb-1 flex justify-between gap-2 text-[10px] font-bold uppercase opacity-70"><span>{Boolean(item.is_internal) ? 'Internal note' : item.author_type === 'EMPLOYEE' ? 'ONESALEZ' : 'Client'}</span><span>{formatDate(item.created_at)}</span></div><p className="whitespace-pre-wrap leading-5">{item.message}</p></div>)}</div><form onSubmit={onSubmit} className="mt-5 border-t border-[var(--border)] pt-4"><textarea required value={message} onChange={(event) => setMessage(event.target.value)} className="min-h-24 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--brand)]" placeholder={internal ? 'Private note for employees…' : 'Reply visible to the client…'} /><label className="mt-2 flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={internal} onChange={(event) => setInternal(event.target.checked)} />Internal employee-only note</label>{error && <p className="mt-2 text-xs text-red-700">Message could not be sent.</p>}<Button type="submit" disabled={pending || !message.trim()} className="mt-3 w-full"><Send className="mr-2 h-4 w-4" />{pending ? 'Sending…' : internal ? 'Add internal note' : 'Send to client'}</Button></form></aside>; }
-function ActionDialog({ action, note, setNote, pending, error, onClose, onSubmit }: { action: Exclude<TicketAction, 'accept'>; note: string; setNote: (value: string) => void; pending: boolean; error: Error | null; onClose: () => void; onSubmit: () => void }) { const labels = { release: ['Release ticket', 'Explain why this attempt could not be completed.'], complete: ['Complete ticket', 'Record the final resolution delivered to the client.'], decline: ['Decline ticket', 'Record why this request is being declined.'] } as const; return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true"><div className="w-full max-w-lg rounded-3xl bg-[var(--surface)] p-5 shadow-2xl sm:p-7"><div className="flex items-start justify-between"><div><h3 className="text-lg font-bold">{labels[action][0]}</h3><p className="mt-1 text-sm text-[var(--muted)]">{labels[action][1]}</p></div><button type="button" onClick={onClose} aria-label="Close action" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-[var(--surface-soft)]"><X className="h-5 w-5" /></button></div><textarea autoFocus required value={note} onChange={(event) => setNote(event.target.value)} className="mt-5 min-h-32 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--brand)]" placeholder="Mandatory service note" />{error && <p className="mt-2 text-xs text-red-700">{error instanceof ApiError ? error.message : 'The action could not be completed.'}</p>}<div className="mt-4 flex justify-end gap-2"><Button onClick={onClose} className="bg-slate-500 hover:bg-slate-600">Cancel</Button><Button disabled={pending || !note.trim()} onClick={onSubmit}>{pending ? 'Saving…' : labels[action][0]}</Button></div></div></div>; }
-function PriorityBadge({ priority }: { priority: TicketPriority }) { const style = priority === 'URGENT' ? 'bg-red-50 text-red-700' : priority === 'HIGH' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'; return <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${style}`}>{priority}</span>; }
-function StatusBadge({ status }: { status: TicketStatus }) { const style: Record<TicketStatus, string> = { OPEN: 'bg-blue-50 text-blue-700', ACCEPTED: 'bg-amber-50 text-amber-700', COMPLETED: 'bg-emerald-50 text-emerald-700', DECLINED: 'bg-red-50 text-red-700' }; return <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${style[status]}`}>{status}</span>; }
-function formatDate(value: string) { return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)); }
+function TicketMain({
+  ticket,
+  mine,
+  canDecline,
+  transitionPending,
+  priorityPending,
+  error,
+  onAction,
+  onPriority,
+}: {
+  ticket: TicketDetails;
+  mine: boolean;
+  canDecline: boolean;
+  transitionPending: boolean;
+  priorityPending: boolean;
+  error: string | null;
+  onAction: (action: TicketAction) => void;
+  onPriority: (priority: TicketPriority) => void;
+}) {
+  return (
+    <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-7">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-xl font-bold text-[var(--brand)]">
+              {ticket.service_request_number}
+            </h2>
+            <StatusBadge status={ticket.ticket_status} />
+          </div>
+          <h3 className="mt-2 text-lg font-semibold">{ticket.subject}</h3>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            {ticket.client_name} · {ticket.location_name} ·{" "}
+            {ticket.reported_by_name}
+          </p>
+        </div>
+        <select
+          aria-label="Ticket priority"
+          value={ticket.priority}
+          onChange={(event) => onPriority(event.target.value as TicketPriority)}
+          disabled={priorityPending}
+          className="h-10 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-xs font-bold uppercase"
+        >
+          <option value="NORMAL">Normal priority</option>
+          <option value="HIGH">High priority</option>
+          <option value="URGENT">Urgent priority</option>
+        </select>
+      </div>
+      <div className="mt-6 rounded-2xl bg-[var(--surface-soft)] p-4">
+        <p className="text-xs font-bold uppercase text-[var(--muted)]">
+          Problem description
+        </p>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6">
+          {ticket.issue_description}
+        </p>
+      </div>
+      {ticket.final_resolution && (
+        <div className="mt-4 rounded-2xl bg-emerald-50 p-4 text-emerald-950">
+          <p className="text-xs font-bold uppercase">Final resolution</p>
+          <p className="mt-2 text-sm">{ticket.final_resolution}</p>
+        </div>
+      )}
+      {error && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-800"
+        >
+          {error}
+        </div>
+      )}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {ticket.ticket_status === "OPEN" && (
+          <Button
+            disabled={transitionPending}
+            onClick={() => onAction("accept")}
+          >
+            <UserRoundCheck className="mr-2 h-4 w-4" />
+            Accept ticket
+          </Button>
+        )}
+        {ticket.ticket_status === "ACCEPTED" && mine && (
+          <>
+            <Button
+              onClick={() => onAction("complete")}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Complete
+            </Button>
+            <Button
+              onClick={() => onAction("release")}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              <Clock3 className="mr-2 h-4 w-4" />
+              Release
+            </Button>
+          </>
+        )}
+        {ticket.ticket_status === "ACCEPTED" && !mine && (
+          <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            Accepted by {ticket.current_employee_name}. Only that employee can
+            release or complete it.
+          </p>
+        )}
+        {canDecline && ticket.ticket_status !== "DECLINED" && (
+          <Button
+            onClick={() => onAction("decline")}
+            className="bg-red-600 hover:bg-red-700"
+          >
+            <ShieldAlert className="mr-2 h-4 w-4" />
+            Decline
+          </Button>
+        )}
+      </div>
+    </article>
+  );
+}
+function Attempts({ ticket }: { ticket: TicketDetails }) {
+  return (
+    <article className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-7">
+      <h3 className="flex items-center gap-2 font-bold">
+        <Wrench className="h-4 w-4 text-[var(--brand)]" />
+        Service attempts
+      </h3>
+      {ticket.attempts.length === 0 ? (
+        <p className="mt-4 text-sm text-[var(--muted)]">
+          No employee has attempted this ticket yet.
+        </p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {ticket.attempts.map((attempt) => (
+            <div
+              key={attempt.attempt_id}
+              className="rounded-xl bg-[var(--surface-soft)] p-3"
+            >
+              <div className="flex flex-wrap justify-between gap-2 text-sm">
+                <span className="font-semibold">
+                  Attempt {attempt.attempt_number} · {attempt.employee_name}
+                </span>
+                <span className="text-[10px] font-bold uppercase text-[var(--muted)]">
+                  {attempt.attempt_status}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-[var(--muted)]">
+                Accepted {formatDate(attempt.accepted_at)}
+              </p>
+              {attempt.service_note && (
+                <p className="mt-2 text-sm leading-5">{attempt.service_note}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
+function Conversation({
+  ticket,
+  message,
+  internal,
+  pending,
+  error,
+  setMessage,
+  setInternal,
+  onSubmit,
+}: {
+  ticket: TicketDetails;
+  message: string;
+  internal: boolean;
+  pending: boolean;
+  error: boolean;
+  setMessage: (value: string) => void;
+  setInternal: (value: boolean) => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <aside className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-sm sm:p-6">
+      <h3 className="flex items-center gap-2 font-bold">
+        <MessageSquare className="h-4 w-4 text-[var(--brand)]" />
+        Conversation and notes
+      </h3>
+      <div className="mt-4 max-h-[440px] space-y-3 overflow-y-auto">
+        {ticket.messages.length === 0 ? (
+          <p className="py-8 text-center text-sm text-[var(--muted)]">
+            No messages yet.
+          </p>
+        ) : (
+          ticket.messages.map((item) => (
+            <div
+              key={item.message_id}
+              className={`rounded-xl p-3 text-sm ${Boolean(item.is_internal) ? "border border-amber-200 bg-amber-50 text-amber-950" : item.author_type === "EMPLOYEE" ? "bg-blue-50 text-blue-950" : "bg-[var(--surface-soft)]"}`}
+            >
+              <div className="mb-1 flex justify-between gap-2 text-[10px] font-bold uppercase opacity-70">
+                <span>
+                  {Boolean(item.is_internal)
+                    ? "Internal note"
+                    : item.author_type === "EMPLOYEE"
+                      ? "ONESALEZ"
+                      : "Client"}
+                </span>
+                <span>{formatDate(item.created_at)}</span>
+              </div>
+              <p className="whitespace-pre-wrap leading-5">{item.message}</p>
+            </div>
+          ))
+        )}
+      </div>
+      <form
+        onSubmit={onSubmit}
+        className="mt-5 border-t border-[var(--border)] pt-4"
+      >
+        <textarea
+          aria-label="Message"
+          required
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          className="min-h-24 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--brand)]"
+          placeholder={
+            internal
+              ? "Private note for employees…"
+              : "Reply visible to the client…"
+          }
+        />
+        <label className="mt-2 flex items-center gap-2 text-xs font-semibold">
+          <input
+            type="checkbox"
+            checked={internal}
+            onChange={(event) => setInternal(event.target.checked)}
+          />
+          Internal employee-only note
+        </label>
+        {error && (
+          <p className="mt-2 text-xs text-red-700">
+            Message could not be sent.
+          </p>
+        )}
+        <Button
+          type="submit"
+          disabled={pending || !message.trim()}
+          className="mt-3 w-full"
+        >
+          <Send className="mr-2 h-4 w-4" />
+          {pending
+            ? "Sending…"
+            : internal
+              ? "Add internal note"
+              : "Send to client"}
+        </Button>
+      </form>
+    </aside>
+  );
+}
+function ActionDialog({
+  action,
+  note,
+  setNote,
+  pending,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  action: Exclude<TicketAction, "accept">;
+  note: string;
+  setNote: (value: string) => void;
+  pending: boolean;
+  error: Error | null;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const dialogRef = useDialog(() => {
+    if (!pending) onClose();
+  });
+  const labels = {
+    release: [
+      "Release ticket",
+      "Explain why this attempt could not be completed.",
+    ],
+    complete: [
+      "Complete ticket",
+      "Record the final resolution delivered to the client.",
+    ],
+    decline: ["Decline ticket", "Record why this request is being declined."],
+  } as const;
+  return (
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm"
+      ref={dialogRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label={labels[action][0]}
+    >
+      <div className="w-full max-w-lg rounded-3xl bg-[var(--surface)] p-5 shadow-2xl sm:p-7">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-bold">{labels[action][0]}</h3>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {labels[action][1]}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close action"
+            className="grid h-9 w-9 place-items-center rounded-xl hover:bg-[var(--surface-soft)]"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <textarea
+          autoFocus
+          required
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          className="mt-5 min-h-32 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--brand)]"
+          placeholder="Mandatory service note"
+        />
+        {error && (
+          <p className="mt-2 text-xs text-red-700">
+            {error instanceof ApiError
+              ? error.message
+              : "The action could not be completed."}
+          </p>
+        )}
+        <div className="mt-4 flex justify-end gap-2">
+          <Button onClick={onClose} className="bg-slate-500 hover:bg-slate-600">
+            Cancel
+          </Button>
+          <Button disabled={pending || !note.trim()} onClick={onSubmit}>
+            {pending ? "Saving…" : labels[action][0]}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function PriorityBadge({ priority }: { priority: TicketPriority }) {
+  const style =
+    priority === "URGENT"
+      ? "bg-red-50 text-red-700"
+      : priority === "HIGH"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-slate-100 text-slate-600";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${style}`}
+    >
+      {priority}
+    </span>
+  );
+}
+function StatusBadge({ status }: { status: TicketStatus }) {
+  const style: Record<TicketStatus, string> = {
+    OPEN: "bg-blue-50 text-blue-700",
+    ACCEPTED: "bg-amber-50 text-amber-700",
+    COMPLETED: "bg-emerald-50 text-emerald-700",
+    DECLINED: "bg-red-50 text-red-700",
+  };
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${style[status]}`}
+    >
+      {status}
+    </span>
+  );
+}
+const formatDate = formatServiceDate;

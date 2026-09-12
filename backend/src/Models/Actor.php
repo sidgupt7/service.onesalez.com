@@ -14,13 +14,14 @@ final readonly class Actor
         public array $roles,
         public array $permissions,
         public ?string $displayName = null,
+        public ?int $sessionId = null,
     ) {
     }
 
     public function can(string $permission): bool
     {
-        return in_array('SYSTEM_ADMIN', $this->roles, true)
-            || in_array($permission, $this->permissions, true);
+        return $this->type === 'EMPLOYEE' && (in_array('SYSTEM_ADMIN', $this->roles, true)
+            || in_array($permission, $this->permissions, true));
     }
 
     public function identifier(): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repositories;
 
 use App\Utils\Input;
+use App\Models\Actor;
 
 final class TicketRepository extends BaseRepository
 {
@@ -24,7 +25,7 @@ final class TicketRepository extends BaseRepository
         return $row !== null;
     }
 
-    public function paginate(array $filters, ?int $clientId = null): array
+    public function paginate(array $filters, Actor $actor): array
     {
         $page = Input::positiveInt($filters['page'] ?? null, 1);
         $limit = min(100, Input::positiveInt($filters['limit'] ?? null, 20));
@@ -36,13 +37,45 @@ final class TicketRepository extends BaseRepository
                 $params[$input] = $filters[$input];
             }
         }
-        if ($clientId !== null) {
-            $where[] = 't.client_id=:client_id';
-            $params['client_id'] = $clientId;
+        if (!$actor->can('tickets.decline')) {
+            $where[] = "t.ticket_status<>'DECLINED'";
+        }
+        if ($actor->type === 'CLIENT_CONTACT') {
+            $where[] = 't.client_id=:client_id AND EXISTS (
+                SELECT 1 FROM client_contacts contact
+                JOIN clients client ON client.client_id=contact.client_id AND client.is_active=TRUE AND client.is_deleted=FALSE
+                JOIN client_locations location ON location.location_id=t.location_id AND location.client_id=client.client_id
+                    AND location.is_active=TRUE AND location.is_deleted=FALSE
+                WHERE contact.contact_id=:contact_id AND contact.client_id=t.client_id
+                    AND contact.is_active=TRUE AND contact.is_deleted=FALSE
+                    AND (contact.has_all_locations=TRUE OR EXISTS (
+                        SELECT 1 FROM client_contact_locations access
+                        WHERE access.contact_id=contact.contact_id AND access.location_id=t.location_id AND access.is_deleted=FALSE
+                    )))';
+            $params['client_id'] = $actor->clientId ?? 0;
+            $params['contact_id'] = $actor->id;
         }
         if (!empty($filters['search'])) {
-            $where[] = '(t.service_request_number LIKE :search OR t.subject LIKE :search)';
+            $where[] = '(t.service_request_number LIKE :search OR t.subject LIKE :search_subject
+                OR EXISTS (SELECT 1 FROM clients sc WHERE sc.client_id=t.client_id AND sc.legal_name LIKE :search_client)
+                OR EXISTS (SELECT 1 FROM client_locations sl WHERE sl.location_id=t.location_id AND sl.location_name LIKE :search_location))';
             $params['search'] = '%' . $filters['search'] . '%';
+            $params['search_subject'] = $params['search'];
+            $params['search_client'] = $params['search'];
+            $params['search_location'] = $params['search'];
+        }
+        if (!empty($filters['client_id']) && $actor->type === 'EMPLOYEE') {
+            $where[] = 't.client_id=:filter_client';
+            $params['filter_client'] = Input::positiveInt($filters['client_id'], 0);
+        }
+        $countWhere = array_values(array_filter($where, static fn (string $clause): bool => $clause !== 't.ticket_status=:status'));
+        $countParams = array_diff_key($params, ['status' => true]);
+        $counts = array_fill_keys(['OPEN', 'ACCEPTED', 'COMPLETED', 'DECLINED'], 0);
+        foreach (
+            $this->fetchAll('SELECT t.ticket_status, COUNT(*) total FROM service_tickets t WHERE '
+            . implode(' AND ', $countWhere) . ' GROUP BY t.ticket_status', $countParams) as $row
+        ) {
+            $counts[$row['ticket_status']] = (int) $row['total'];
         }
         $condition = implode(' AND ', $where);
         $total = $this->fetchOne("SELECT COUNT(*) total FROM service_tickets t WHERE {$condition}", $params);
@@ -52,10 +85,10 @@ final class TicketRepository extends BaseRepository
              FROM service_tickets t JOIN clients c ON c.client_id=t.client_id
              JOIN client_locations l ON l.location_id=t.location_id
              LEFT JOIN employees e ON e.employee_id=t.current_employee_id
-             WHERE {$condition} ORDER BY t.created_at DESC LIMIT {$limit} OFFSET {$offset}",
+             WHERE {$condition} ORDER BY t.created_at DESC, t.ticket_id DESC LIMIT {$limit} OFFSET {$offset}",
             $params,
         );
-        return ['items' => $items, 'total' => (int) ($total['total'] ?? 0), 'page' => $page, 'limit' => $limit];
+        return ['items' => $items, 'total' => (int) ($total['total'] ?? 0), 'page' => $page, 'limit' => $limit, 'counts' => $counts];
     }
 
     public function find(int $id): ?array
@@ -93,7 +126,11 @@ final class TicketRepository extends BaseRepository
 
     public function create(array $data, string $actor): int
     {
-        return $this->insert('service_tickets', $data + ['created_by' => $actor]);
+        return $this->database->transaction(function () use ($data, $actor): int {
+            $id = $this->insert('service_tickets', $data + ['created_by' => $actor]);
+            $this->history($id, null, 'OPEN', 'CLIENT_CONTACT', (int) $data['reported_by_contact_id'], $actor);
+            return $id;
+        });
     }
 
     public function history(int $ticketId, ?string $from, string $to, string $actorType, int $actorId, string $actor): void
@@ -172,7 +209,7 @@ final class TicketRepository extends BaseRepository
     {
         return $this->database->transaction(function () use ($ticketId, $employeeId, $reason, $actor): bool {
             $ticket = $this->fetchOne(
-                "SELECT ticket_status FROM service_tickets WHERE ticket_id=:id AND ticket_status NOT IN ('COMPLETED','DECLINED') AND is_deleted=FALSE FOR UPDATE",
+                "SELECT ticket_status FROM service_tickets WHERE ticket_id=:id AND ticket_status<>'DECLINED' AND is_deleted=FALSE FOR UPDATE",
                 ['id' => $ticketId],
             );
             if ($ticket === null) {
@@ -264,6 +301,14 @@ final class TicketRepository extends BaseRepository
             $note,
             $actor,
         ): bool {
+            // All state transitions lock the ticket before touching its attempts.
+            $ticket = $this->fetchOne(
+                "SELECT ticket_id FROM service_tickets WHERE ticket_id=:id AND ticket_status='ACCEPTED' AND is_deleted=FALSE FOR UPDATE",
+                ['id' => $ticketId],
+            );
+            if ($ticket === null) {
+                return false;
+            }
             $attempt = $this->currentAttempt($ticketId);
             if ($attempt === null || (int) $attempt['employee_id'] !== $employeeId) {
                 return false;

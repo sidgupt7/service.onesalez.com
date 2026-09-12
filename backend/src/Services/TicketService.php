@@ -22,7 +22,7 @@ final class TicketService
 
     public function list(array $query, Actor $actor): array
     {
-        return $this->repository->paginate(Input::sanitize($query), $actor->type === 'CLIENT_CONTACT' ? $actor->clientId : null);
+        return $this->repository->paginate(Input::sanitize($query), $actor);
     }
 
     public function get(int $id, Actor $actor): array
@@ -65,7 +65,6 @@ final class TicketService
             'issue_description' => $data['issue_description'],
             'priority' => $data['priority'] ?? 'NORMAL',
         ], $actor->identifier());
-        $this->repository->history($id, null, 'OPEN', $actor->type, $actor->id, $actor->identifier());
         return $this->get($id, $actor);
     }
 
@@ -91,6 +90,7 @@ final class TicketService
 
     public function priority(int $id, string $priority, Actor $actor): array
     {
+        $this->get($id, $actor);
         $this->validator->validate(['priority' => $priority], ['priority' => ['required', ['in' => self::PRIORITIES]]]);
         if (!$this->repository->updatePriority($id, $priority, $actor->identifier())) {
             throw new NotFoundException('Ticket not found.');
@@ -105,6 +105,7 @@ final class TicketService
         }
         $data = Input::sanitize($input);
         $this->validator->validate($data, ['issue_description' => ['required']]);
+        $this->get($id, $actor);
         if (
             !$this->repository->updateDescription(
                 $id,
@@ -123,7 +124,7 @@ final class TicketService
     {
         $this->get($id, $actor);
         $data = Input::sanitize($input);
-        $this->validator->validate($data, ['message' => ['required'], 'is_internal' => []]);
+        $this->validator->validate($data, ['message' => ['required', ['max' => 10000]], 'is_internal' => [['in' => [true, false, 0, 1]]]]);
         $internal = $actor->type === 'EMPLOYEE' && filter_var($data['is_internal'] ?? false, FILTER_VALIDATE_BOOL);
         $messageId = $this->repository->addMessage([
             'ticket_id' => $id,
@@ -139,6 +140,7 @@ final class TicketService
 
     public function delete(int $id, Actor $actor): void
     {
+        $this->get($id, $actor);
         if (!$this->repository->softDelete($id, $actor->identifier())) {
             throw new BadRequestException('Only completed or declined tickets may be removed.');
         }
@@ -146,7 +148,13 @@ final class TicketService
 
     private function assertScope(array $ticket, Actor $actor): void
     {
-        if ($actor->type === 'CLIENT_CONTACT' && (int) $ticket['client_id'] !== $actor->clientId) {
+        if ($ticket['ticket_status'] === 'DECLINED' && !$actor->can('tickets.decline')) {
+            throw new AuthorizationException();
+        }
+        if (
+            $actor->type === 'CLIENT_CONTACT' && ((int) $ticket['client_id'] !== $actor->clientId
+            || !$this->repository->contactCanUseLocation($actor->clientId ?? 0, $actor->id, (int) $ticket['location_id']))
+        ) {
             throw new AuthorizationException();
         }
     }

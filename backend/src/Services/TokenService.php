@@ -19,7 +19,7 @@ final class TokenService
         }
     }
 
-    public function accessToken(Actor $actor): string
+    public function accessToken(Actor $actor, ?int $sessionId = null): string
     {
         $now = time();
         return JWT::encode([
@@ -27,6 +27,7 @@ final class TokenService
             'sub' => $actor->identifier(),
             'iat' => $now,
             'exp' => $now + $this->config['jwt_access_ttl'],
+            'sid' => $sessionId,
             'actor' => [
                 'id' => $actor->id,
                 'type' => $actor->type,
@@ -55,6 +56,7 @@ final class TokenService
                 array_values((array) $actor['roles']),
                 array_values((array) $actor['permissions']),
                 isset($actor['display_name']) ? (string) $actor['display_name'] : null,
+                isset($payload->sid) ? (int) $payload->sid : null,
             );
         } catch (AuthenticationException $exception) {
             throw $exception;

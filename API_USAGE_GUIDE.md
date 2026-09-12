@@ -1,6 +1,6 @@
 # ONESALEZ Service CRM — API Usage Guide
 
-This document covers every API currently implemented in the PHP backend.
+For the September 2026 authorization, pagination, conversion, team, session and recovery changes, see [API_CHANGES.md](API_CHANGES.md). The [OpenAPI document](backend/docs/openapi.yaml) includes all 58 registered method/path pairs. Examples below retain the legacy response form unless stated otherwise.
 
 ## 1. Base URL
 

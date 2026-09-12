@@ -17,6 +17,9 @@ final class UserController extends Controller
     public function index(Request $request): Response
     {
         $result = $this->service->list($request->query);
+        if (($request->query['paginated'] ?? '') === '1') {
+            return Response::success($result);
+        }
         return Response::success($result['items'], 200, array_diff_key($result, ['items' => true]));
     }
 
@@ -74,6 +77,28 @@ final class UserController extends Controller
     public function createTeam(Request $request): Response
     {
         return Response::success($this->service->createTeam($request->body, $this->actor($request)), 201);
+    }
+
+    public function teams(Request $request): Response
+    {
+        return Response::success($this->service->teams($this->actor($request)));
+    }
+
+    public function updateTeam(Request $request, array $parameters): Response
+    {
+        return Response::success($this->service->updateTeam($this->id($parameters, 'team_id'), $request->body, $this->actor($request)));
+    }
+
+    public function removeTeam(Request $request, array $parameters): Response
+    {
+        $this->service->removeTeam($this->id($parameters, 'team_id'), $this->actor($request));
+        return Response::success(['message' => 'Team removed.']);
+    }
+
+    public function removeTeamMember(Request $request, array $parameters): Response
+    {
+        $this->service->removeTeamMember($this->id($parameters, 'team_id'), $this->id($parameters, 'employee_id'), $this->actor($request));
+        return Response::success(['message' => 'Team member removed.']);
     }
 
     public function addTeamMember(Request $request, array $parameters): Response

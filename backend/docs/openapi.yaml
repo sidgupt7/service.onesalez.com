@@ -1,7 +1,10 @@
 openapi: 3.1.0
 info:
   title: ONESALEZ Service CRM API
-  version: 1.0.0
+  version: 1.1.0
+  description: Service CRM API. See API_CHANGES.md for authorization, pagination, reset/session and
+    migration contracts. All dates without an offset are Asia/Kolkata. Access tokens are tied to an
+    active refresh session; account and permissions are rechecked on each request.
 servers:
   - url: https://service.onesalez.com/api/v1
 security:
@@ -12,126 +15,1264 @@ paths:
       security: []
       summary: Health check
       responses:
-        '200': {description: Healthy, content: {application/json: {schema: {$ref: '#/components/schemas/Success'}}}}
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Success"
+      parameters: []
   /auth/login:
     post:
       security: []
       summary: Authenticate a client contact or employee
-      requestBody: {$ref: '#/components/requestBodies/Login'}
+      requestBody:
+        $ref: "#/components/requestBodies/Login"
       responses:
-        '200': {description: Tokens issued}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '422': {$ref: '#/components/responses/Validation'}
+        "200":
+          description: Tokens issued
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /auth/register:
     post:
-      summary: Create an employee or a client contact within the caller's authority
+      summary: System administrator creates an employee; client self-registration is forbidden
       responses:
-        '201': {description: User created}
-        '403': {$ref: '#/components/responses/Forbidden'}
+        "201":
+          description: User created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /auth/refresh:
     post:
       security: []
       summary: Rotate a refresh token
       responses:
-        '200': {description: New token pair}
-        '401': {$ref: '#/components/responses/Unauthorized'}
+        "200":
+          description: New token pair
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /auth/logout:
     post:
       summary: Revoke a refresh token
-      responses: {'200': {description: Logged out}}
+      responses:
+        "200":
+          description: Logged out
+        "422":
+          $ref: "#/components/responses/Validation"
+      security: []
+      parameters: []
   /auth/forgot-password:
     post:
       security: []
       summary: Queue a password-reset email
-      responses: {'200': {description: Non-enumerating acknowledgement}}
+      responses:
+        "200":
+          description: Non-enumerating acknowledgement
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                realm:
+                  type: string
+                  enum:
+                    - client
+                    - employee
+                email:
+                  type: string
+                  format: email
+              required:
+                - realm
+                - email
   /auth/reset-password:
     post:
       security: []
       summary: Set a password using a reset token
-      responses: {'200': {description: Password updated}, '401': {$ref: '#/components/responses/Unauthorized'}}
+      responses:
+        "200":
+          description: Password updated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                realm:
+                  type: string
+                  enum:
+                    - client
+                    - employee
+                token: &a1
+                  type: string
+                password: &a2
+                  type: string
+                  minLength: 12
+                  description: Preserved exactly; maximum 72 UTF-8 bytes and no null characters.
+              required:
+                - realm
+                - token
+                - password
   /leads:
     get:
       summary: Search and paginate leads
       parameters:
-        - {$ref: '#/components/parameters/Pagination'}
-      responses: {'200': {description: Lead collection}}
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: paginated
+          in: query
+          schema:
+            type: string
+            enum:
+              - "1"
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lead collection
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      description: With paginated=1, data is {items,total,page,limit}; tickets also includes counts for
+        all statuses within the authorized search scope. Otherwise data is a legacy array and
+        pagination is in top-level meta. Ticket status totals ignore the selected status. Declined
+        tickets require tickets.decline. Contacts are always scoped by client and location grants.
     post:
       summary: Create a lead
-      responses: {'201': {description: Lead created}}
+      responses:
+        "201":
+          description: Lead created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /leads/{id}:
-    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-    get: {summary: Get a lead, responses: {'200': {description: Lead}, '404': {$ref: '#/components/responses/NotFound'}}}
-    put: {summary: Update a lead, responses: {'200': {description: Updated lead}}}
-    delete: {summary: Soft-delete a lead, responses: {'200': {description: Lead removed}}}
+    get:
+      summary: Get a lead
+      responses:
+        "200":
+          description: Lead
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    put:
+      summary: Update a lead
+      responses:
+        "200":
+          description: Updated lead
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    delete:
+      summary: Soft-delete a lead
+      responses:
+        "200":
+          description: Lead removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
   /leads/bulk-status:
-    post: {summary: Update the status of multiple leads, responses: {'200': {description: Update count}}}
+    post:
+      summary: Update the status of multiple leads
+      responses:
+        "200":
+          description: Update count
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /customers:
-    get: {summary: Search and paginate clients, responses: {'200': {description: Client collection}}}
-    post: {summary: Create a client, responses: {'201': {description: Client created}}}
+    get:
+      summary: Search and paginate clients
+      responses:
+        "200":
+          description: Client collection
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: paginated
+          in: query
+          schema:
+            type: string
+            enum:
+              - "1"
+        - name: search
+          in: query
+          schema:
+            type: string
+      description: With paginated=1, data is {items,total,page,limit}; tickets also includes counts for
+        all statuses within the authorized search scope. Otherwise data is a legacy array and
+        pagination is in top-level meta. Ticket status totals ignore the selected status. Declined
+        tickets require tickets.decline. Contacts are always scoped by client and location grants.
+    post:
+      summary: Create a client
+      responses:
+        "201":
+          description: Client created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /customers/onboard:
     post:
       summary: Atomically create a client, primary location, client administrator, and login account
       responses:
-        '201': {description: Client onboarding completed}
-        '422': {$ref: '#/components/responses/Validation'}
+        "201":
+          description: Client onboarding completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /customers/{id}:
-    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-    get: {summary: Get client, locations, and contacts, responses: {'200': {description: Client}}}
-    put: {summary: Update client, responses: {'200': {description: Updated client}}}
-    delete: {summary: Soft-delete client, responses: {'200': {description: Client removed}}}
+    get:
+      summary: Get client
+      locations: null
+      and contacts: null
+      responses:
+        "200":
+          description: Client
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      description: Employees may maintain clients. Contacts receive only their own contact profile and
+        authorized active locations; internal client notes are omitted.
+    put:
+      summary: Update client
+      responses:
+        "200":
+          description: Updated client
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    delete:
+      summary: Soft-delete client
+      responses:
+        "200":
+          description: Client removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
   /customers/{id}/service-history:
     get:
       summary: Paginated client service history
-      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-      responses: {'200': {description: Ticket history}}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Ticket history
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /tickets:
-    get: {summary: Filter and paginate visible tickets, responses: {'200': {description: Ticket collection}}}
-    post: {summary: Client contact raises a ticket, responses: {'201': {description: Ticket created}}}
+    get:
+      summary: Filter and paginate visible tickets
+      responses:
+        "200":
+          description: Ticket collection
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: paginated
+          in: query
+          schema:
+            type: string
+            enum:
+              - "1"
+        - name: search
+          in: query
+          schema:
+            type: string
+      description: With paginated=1, data is {items,total,page,limit}; tickets also includes counts for
+        all statuses within the authorized search scope. Otherwise data is a legacy array and
+        pagination is in top-level meta. Ticket status totals ignore the selected status. Declined
+        tickets require tickets.decline. Contacts are always scoped by client and location grants.
+    post:
+      summary: Client contact raises a ticket
+      responses:
+        "201":
+          description: Ticket created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /tickets/{id}:
-    parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-    get: {summary: Get ticket, attempts, and conversation, responses: {'200': {description: Ticket}}}
-    delete: {summary: Soft-delete a completed or declined ticket, responses: {'200': {description: Ticket removed}}}
+    get:
+      summary: Get ticket
+      attempts: null
+      and conversation: null
+      responses:
+        "200":
+          description: Ticket
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    delete:
+      summary: Soft-delete a completed or declined ticket
+      responses:
+        "200":
+          description: Ticket removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
   /tickets/{id}/{action}:
     post:
       summary: Accept, release, complete, or decline a ticket
       parameters:
-        - {name: id, in: path, required: true, schema: {type: integer}}
-        - {name: action, in: path, required: true, schema: {type: string, enum: [accept, release, complete, decline]}}
-      responses: {'200': {description: Updated ticket}, '400': {description: Invalid state transition}}
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - accept
+              - release
+              - complete
+              - decline
+      responses:
+        "200":
+          description: Updated ticket
+        "400":
+          description: Invalid state transition
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      description: Acceptance locks the ticket and creates one attempt. Release keeps the failed attempt
+        and returns OPEN. Completion closes the current attempt. Decline requires tickets.decline
+        and is allowed from OPEN, ACCEPTED or COMPLETED.
   /tickets/{id}/priority:
     put:
       summary: Change ticket priority
-      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-      responses: {'200': {description: Updated ticket}}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Updated ticket
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
   /tickets/{id}/messages:
     post:
       summary: Add a public or employee-internal ticket message
-      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-      responses: {'201': {description: Message created}}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "201":
+          description: Message created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  maxLength: 10000
+                is_internal:
+                  type: boolean
+                  default: false
+              required:
+                - message
   /analytics:
     get:
       summary: Executive service summary and employee performance
       parameters:
-        - {name: from, in: query, schema: {type: string, format: date}}
-        - {name: to, in: query, schema: {type: string, format: date}}
-      responses: {'200': {description: Analytics dashboard}}
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Analytics dashboard
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /users:
-    get: {summary: Paginate employees and roles, responses: {'200': {description: Employee collection}}}
+    get:
+      summary: Paginate employees and roles
+      responses:
+        "200":
+          description: Employee collection
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: paginated
+          in: query
+          schema:
+            type: string
+            enum:
+              - "1"
+        - name: search
+          in: query
+          schema:
+            type: string
+      description: With paginated=1, data is {items,total,page,limit}; tickets also includes counts for
+        all statuses within the authorized search scope. Otherwise data is a legacy array and
+        pagination is in top-level meta. Ticket status totals ignore the selected status. Declined
+        tickets require tickets.decline. Contacts are always scoped by client and location grants.
+    post:
+      summary: POST /users
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
   /users/{id}/suspend:
     post:
       summary: Suspend an employee and login account
-      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
-      responses: {'200': {description: Employee suspended}}
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Employee suspended
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
   /teams:
-    post: {summary: Create a service team, responses: {'201': {description: Team created}}}
+    post:
+      summary: Create a service team
+      responses:
+        "201":
+          description: Team created
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+    get:
+      summary: List teams and memberships (system administrator)
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters: []
   /teams/{team_id}/members:
     post:
       summary: Assign an employee to a team
-      parameters: [{name: team_id, in: path, required: true, schema: {type: integer}}]
-      responses: {'201': {description: Member assigned}}
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "201":
+          description: Member assigned
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+  /customers/{id}/locations/{location_id}:
+    delete:
+      summary: Employee updates or soft-removes a location, preserving ticket history
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    put:
+      summary: Employee updates or soft-removes a location, preserving ticket history
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /customers/{id}/contacts/{contact_id}:
+    delete:
+      summary: Employee updates or soft-removes a contact, preserving ticket history
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    put:
+      summary: Employee updates or soft-removes a contact, preserving ticket history
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /leads/{id}/convert:
+    post:
+      summary: Atomically onboard a complete client and mark an unconverted lead WON
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                client:
+                  type: object
+                  description: Client fields as customers/onboard
+                location:
+                  type: object
+                  description: Initial location fields as customers/onboard
+                administrator:
+                  type: object
+                  description: Contact profile and initial password as customers/onboard
+              required:
+                - client
+                - location
+                - administrator
+  /teams/{team_id}:
+    put:
+      summary: System administrator updates or soft-removes a team
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    delete:
+      summary: System administrator updates or soft-removes a team
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /teams/{team_id}/members/{employee_id}:
+    delete:
+      summary: System administrator removes team membership
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: team_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: employee_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /auth/pin-login:
+    post:
+      summary: Sign in using an enrolled device and six-digit PIN
+      responses:
+        "200":
+          description: Operation completed
+        "422":
+          $ref: "#/components/responses/Validation"
+      security: []
+      parameters: []
+  /auth/trusted-device:
+    post:
+      summary: Enroll or revoke a trusted PIN device for the authenticated account
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+    delete:
+      summary: Enroll or revoke a trusted PIN device for the authenticated account
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+  /auth/change-password:
+    post:
+      summary: Change password and revoke all sessions and PIN devices
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password: *a1
+                new_password: *a2
+              required:
+                - current_password
+                - new_password
+  /customers/{id}/locations:
+    post:
+      summary: Employee adds a client location
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /customers/{id}/locations/{location_id}/{action}:
+    post:
+      summary: Employee suspends or reactivates a client location
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: location_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - suspend
+              - reactivate
+  /customers/{id}/contacts:
+    post:
+      summary: Employee adds a contact and optionally configures portal access
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /customers/{id}/contacts/{contact_id}/{action}:
+    post:
+      summary: Employee suspends or reactivates a contact and login account
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: contact_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - suspend
+              - reactivate
+  /customers/{id}/{action}:
+    post:
+      summary: Employee suspends or reactivates a client
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - suspend
+              - reactivate
+  /tickets/{id}/description:
+    put:
+      summary: Client contact updates an OPEN or ACCEPTED ticket description with history
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                issue_description: *a1
+              required:
+                - issue_description
+  /reports/service-ledger:
+    get:
+      summary: Filter a paginated service ledger, with summary and filter choices
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: client_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: location_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: employee_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: before_id
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      description: Returns data {items,summary,filters,page,limit,total}. Dates are inclusive India dates.
+        before_id requests rows with a smaller ticket_id for full CSV export; keep all other filters
+        unchanged. Export is not a database snapshot across requests.
+  /users/{id}:
+    get:
+      summary: System administrator reads, updates or soft-removes an employee
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    put:
+      summary: System administrator reads, updates or soft-removes an employee
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+    delete:
+      summary: System administrator reads, updates or soft-removes an employee
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /users/{id}/reactivate:
+    post:
+      summary: System administrator reactivates an employee
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+  /users/{id}/password:
+    put:
+      summary: System administrator resets employee password and revokes sessions
+      responses:
+        "200":
+          description: Operation completed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/Validation"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
 components:
   securitySchemes:
-    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   requestBodies:
     Login:
       required: true
@@ -139,36 +1280,91 @@ components:
         application/json:
           schema:
             type: object
-            required: [email, password, realm]
+            required:
+              - email
+              - password
+              - realm
             properties:
-              email: {type: string, format: email}
-              password: {type: string, minLength: 12}
-              realm: {type: string, enum: [client, employee]}
+              email:
+                type: string
+                format: email
+              password:
+                type: string
+                description: Exact password; at most 72 UTF-8 bytes. Login does not impose the current minimum
+                  creation length.
+              realm:
+                type: string
+                enum:
+                  - client
+                  - employee
   parameters:
     Pagination:
       name: page
       in: query
-      schema: {type: integer, minimum: 1, default: 1}
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
   schemas:
     Success:
       type: object
-      required: [success, data, error, timestamp]
+      required:
+        - success
+        - data
+        - error
+        - timestamp
       properties:
-        success: {type: boolean, const: true}
+        success:
+          type: boolean
+          const: true
         data: {}
-        error: {type: 'null'}
-        timestamp: {type: string, format: date-time}
+        error:
+          type: "null"
+        timestamp:
+          type: string
+          format: date-time
     Error:
       type: object
       properties:
-        success: {type: boolean, const: false}
-        data: {type: 'null'}
+        success:
+          type: boolean
+          const: false
+        data:
+          type: "null"
         error:
           type: object
-          properties: {code: {type: string}, message: {type: string}, details: {type: object}}
-        timestamp: {type: string, format: date-time}
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
   responses:
-    Unauthorized: {description: Authentication failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
-    Forbidden: {description: Permission denied, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
-    NotFound: {description: Resource not found, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
-    Validation: {description: Validation failed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Permission denied
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Validation:
+      description: Validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"

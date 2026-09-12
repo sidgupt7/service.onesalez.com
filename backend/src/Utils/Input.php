@@ -10,6 +10,11 @@ final class Input
     {
         $clean = [];
         foreach ($input as $key => $value) {
+            // Secrets are opaque: trimming or stripping markup changes the password.
+            if (in_array($key, ['password', 'current_password', 'new_password', 'confirm_password'], true)) {
+                $clean[$key] = $value;
+                continue;
+            }
             $clean[$key] = is_array($value)
                 ? self::sanitize($value)
                 : (is_string($value) ? trim(strip_tags($value)) : $value);

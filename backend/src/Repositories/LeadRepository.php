@@ -8,6 +8,22 @@ use App\Utils\Input;
 
 final class LeadRepository extends BaseRepository
 {
+    public function convert(int $id, callable $createClient, string $actor): array
+    {
+        return $this->database->transaction(function () use ($id, $createClient, $actor): array {
+            $lead = $this->fetchOne('SELECT * FROM leads WHERE lead_id=:id AND is_deleted=FALSE FOR UPDATE', ['id' => $id]);
+            if ($lead === null) {
+                throw new \App\Exceptions\NotFoundException('Lead not found.');
+            }
+            if ($lead['converted_client_id'] !== null) {
+                throw new \App\Exceptions\BadRequestException('This lead has already been converted.');
+            }
+            $client = $createClient();
+            $this->updateById('leads', 'lead_id', $id, ['status' => 'WON', 'converted_client_id' => $client['client_id'], 'updated_by' => $actor]);
+            return $client;
+        });
+    }
+
     private const SORTS = ['business_name', 'status', 'created_at'];
 
     public function paginate(array $filters): array
@@ -21,8 +37,10 @@ final class LeadRepository extends BaseRepository
             $params['status'] = $filters['status'];
         }
         if (!empty($filters['search'])) {
-            $where[] = '(business_name LIKE :search OR contact_name LIKE :search OR email LIKE :search)';
+            $where[] = '(business_name LIKE :search OR contact_name LIKE :search_contact OR email LIKE :search_email)';
             $params['search'] = '%' . $filters['search'] . '%';
+            $params['search_contact'] = $params['search'];
+            $params['search_email'] = $params['search'];
         }
         $sort = in_array($filters['sort'] ?? '', self::SORTS, true) ? $filters['sort'] : 'created_at';
         $order = strtoupper((string) ($filters['order'] ?? 'DESC')) === 'ASC' ? 'ASC' : 'DESC';

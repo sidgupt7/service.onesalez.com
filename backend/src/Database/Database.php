@@ -12,6 +12,7 @@ use Throwable;
 final class Database extends AbstractDatabase
 {
     private ?PDO $connection = null;
+    private int $savepoint = 0;
 
     public function __construct(private readonly array $config)
     {
@@ -29,6 +30,18 @@ final class Database extends AbstractDatabase
     public function transaction(callable $operation): mixed
     {
         $pdo = $this->connection();
+        if ($pdo->inTransaction()) {
+            $name = 'nested_' . ++$this->savepoint;
+            $pdo->exec('SAVEPOINT ' . $name);
+            try {
+                $result = $operation($pdo);
+                $pdo->exec('RELEASE SAVEPOINT ' . $name);
+                return $result;
+            } catch (Throwable $exception) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $name);
+                throw $exception;
+            }
+        }
         $pdo->beginTransaction();
 
         try {
@@ -36,10 +49,15 @@ final class Database extends AbstractDatabase
             $pdo->commit();
             return $result;
         } catch (Throwable $exception) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
+            $this->rollbackIfActive($pdo);
             throw $exception;
+        }
+    }
+
+    private function rollbackIfActive(PDO $pdo): void
+    {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
         }
     }
 
@@ -50,7 +68,9 @@ final class Database extends AbstractDatabase
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
-                return new PDO($this->dsn(), $this->config['username'], $this->config['password'], $this->options());
+                $connection = new PDO($this->dsn(), $this->config['username'], $this->config['password'], $this->options());
+                $connection->exec("SET time_zone = '+05:30'");
+                return $connection;
             } catch (PDOException $exception) {
                 $lastException = $exception;
                 if ($attempt < $attempts) {
@@ -79,7 +99,6 @@ final class Database extends AbstractDatabase
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
             PDO::ATTR_PERSISTENT => (bool) $this->config['persistent'],
-            PDO::MYSQL_ATTR_INIT_COMMAND => "SET time_zone = '+05:30'",
         ];
     }
 }

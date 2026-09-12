@@ -223,7 +223,7 @@ Authenticated client contacts can view client-related ticket information, choose
 
 Clients can edit the problem description while a ticket is open or accepted. Previous and replacement descriptions are retained in `service_ticket_description_history`. Employee-only internal messages are filtered out of client message responses.
 
-Current ticket read authorization checks the client tenant; it does not consistently apply the contact's individual location grant to all ticket reads/description edits. Location authorization is explicitly checked when creating a ticket. See the access-control work in Section 18.
+Ticket creation, listing, detail, description updates, and public messages enforce the contact's active client and location grants. Declined visibility requires tickets.decline. These controls were exercised against MariaDB during the 12 September audit.
 
 ### 5.5 Service console
 
@@ -848,55 +848,24 @@ Inspect Playwright configuration/test setup before running browser tests; tests 
 
 ### 17.2 Coverage and current test scope
 
-Backend test files currently cover input helpers, validator, tokens, refresh-cookie behavior, and routing. Frontend files include the login component and login/client-onboarding browser scenarios. This is not comprehensive service/repository/database coverage.
-
-The GitHub Actions workflow installs PHP 8.3, runs style/static checks and PHPUnit with coverage, then checks an 80% threshold. A configured gate is not evidence that 80% has been achieved. The workflow defines a MariaDB service but does not currently execute migrations or include complete database workflow tests. Frontend checks and a pre-push hook are not included in that workflow.
-
-No build, runtime test, or coverage measurement was performed for this documentation-only change. Future verification reports should distinguish source inspection, local tests, live API checks, and browser checks.
+Verification was expanded on 12 September 2026. See [AUDIT_COMPLETION.md](AUDIT_COMPLETION.md) for measured results and evidence limits. The reusable quality workflow runs migrations twice against MariaDB, service/repository integration tests with concurrency, PHPStan level 8, PSR-12, dependency audits, TypeScript/build/unit/browser checks and a Docker build. Coverage is measured in CI; no unmeasured percentage is claimed.
 
 ## 18. Remaining work and known limitations
 
-### 18.1 First priorities: authorization, reliability, and deployment
+The audit completed the previous P1 source findings and missing web workflows: employee/client authority, location and Declined scope, native-PDO search, atomic ticket history, refresh/reset/session races, real dashboard, paginated ticket/directory screens, complete CSV export, Leads conversion, Teams CRUD, Settings, soft removal and customer conversation. Password recovery email delivery and user reset success were verified in the preceding recovery work. The audit does not resend customer recovery emails.
 
-| Priority | Work item | Evidence and completion criteria |
-| --- | --- | --- |
-| P1 | Reconcile administrator authority | `ClientService::assertEmployee()` permits employee maintenance, while `UserService::registerContact()` permits client-admin registration. Apply the agreed policy consistently to onboarding, contact creation/edit/suspension/removal, and role assignment; test each realm/role. |
-| P1 | Complete contact location authorization | Ticket creation validates location grants; ticket listing/detail/description editing mainly use client scope. Apply the intended grants consistently and test same-client contacts with disjoint locations. |
-| P1 | Enforce Declined visibility on the API | The console hides its Declined tab by permission, but generic ticket reads do not apply an equivalent decline-permission filter. Confirm intended client visibility and enforce it server-side. |
-| P1 | Verify deployed browser authentication | Confirm the production bundle uses `/api/v1`, not a development loopback URL; check HTTPS, refresh cookie, CORS, service-worker update, and logout in the deployed browser. Local config alone does not establish deployment success. |
-| P1 | Fix repeated named SQL parameters | Search queries in `TicketRepository` and `AnalyticsRepository` reuse `:search` within a statement while native PDO prepares are enabled. Give each occurrence a distinct binding and test search against MariaDB/PDO. |
-| P1 | Make ticket creation and initial history atomic | `TicketService::create()` writes the ticket and initial history separately. Put them in one transaction and test a history-insert failure. |
-| P1 | Make refresh/device renewal concurrency-safe | Verify token rotation with simultaneous requests, replay, revocation, and password-reset races; use atomic consumption/transactions where needed. |
-| P1 | Fix email claiming and verify delivery | Introduce an exclusive processing claim/lease and recovery, prevent duplicate sends, handle exceptions, and confirm recovery mail reaches users. |
-| P1 | Verify live schema against migrations | Inventory tables, constraints, indexes, routines/views, and applied history. Include migrations 004–006; reconcile any manually applied changes. |
+See [API_CHANGES.md](API_CHANGES.md) for current contracts and recovery procedures. The OpenAPI route inventory covers all 58 registered method/path pairs. Earlier descriptions or examples must be interpreted using these current contracts.
 
-These are source-review findings or explicitly identified verification tasks, not claims of a live exploit or a failed production test.
+Remaining limits and product decisions:
 
-### 18.2 Functional completion
-
-- Connect the executive dashboard to real analytics: workload, pending ageing, completion/decline rates, employee performance, date filters, and charts. Replace static connection claims with appropriate measured status.
-- Add proper server-driven ticket pagination and status totals; the first-100 fetch can omit older open work and undercount tabs.
-- Add report pagination and export all matching rows; current CSV covers the loaded maximum of 500 rows. Protect exported text from spreadsheet formula interpretation.
-- Complete Leads UI and a deliberate lead-to-client conversion transaction/workflow.
-- Complete team listing/editing/member removal and clarify whether reports need team grouping as well as employee grouping.
-- Reconcile the requirement to decline at any stage with the current terminal-state restriction. Add reopening/reassignment only if approved as business behavior.
-- Complete contact/location removal endpoints and UI where required; current dedicated nested routes mainly support creation/editing/status changes.
-- Finish invitation acceptance/expiry/resend and initial-password-change behavior if invitation-based onboarding is retained.
-- Complete multilingual text catalogs and language selection, accessible shared dialogs/tables, consistent empty/error states, and persistent theme preferences.
-- Add Settings and notifications functionality before enabling their navigation/actions. Attachments, SLA rules, push notifications, and a separate MAUI client require their own scope.
-- Validate PWA installation and update behavior on desktop/mobile. Add API navigation exclusions/offline handling as needed; offline mutation support is not currently implemented.
-
-### 18.3 Engineering and operational completion
-
-- Add service/repository integration tests using a disposable MariaDB schema and transaction fixtures. Test simultaneous ticket acceptance, last-admin changes, tenant/location access, expired tokens, account suspension, duplicate identities, and partial failures.
-- Measure coverage, close gaps toward the requested 80% target, and include frontend/browser checks in CI. Add the requested pre-push checks if desired by the team.
-- Verify account suspension and permission changes against existing access tokens; implement immediate invalidation if that is the required policy.
-- Review validation consistency, database constraint failures, numeric/boolean serialization, empty data, date parsing, UTC versus India-time boundaries, and password handling. Password input should not be silently transformed by generic text sanitization.
-- Keep OpenAPI/API examples aligned with the actual route registry and payload shapes.
-- Add complete request/audit observability and consistent CLI exception logging where needed; verify all production responses remain friendly.
-- Harden migrations with deterministic ordering for future files, locking/checksums and recovery guidance; neither runner is currently a general stored-routine migration engine.
-- Verify production PHP extensions, Docker build, OPcache, cron, monitoring, backup automation, and a tested restore. Add storage/retention controls for logs and technical tables.
-- Review large forms/components and long service methods against the original maintainability standards. Installed tools and architecture folders do not establish full standards compliance.
+- Coverage and browser scenarios do not cover every branch, browser engine or assistive technology. The measured figure belongs in the audit evidence; an 80% target is not established simply by configuring coverage collection.
+- Performance measurements use synthetic data in a local MariaDB instance, not a production multi-user capacity test. Wildcard search and exact report counts still require scanning matching rows; very large installations will need workload-specific profiling.
+- Production health is liveness, not database readiness. The deployment audit separately inventories the schema and verifies database reachability. Continuous external uptime alerting and off-host backup retention require a chosen provider/destination and retention policy.
+- Private code/database backups are created before deployment. Local restore verification does not establish a production disaster-recovery time. Logs rotate locally; long-term audit/session/email technical-table retention must follow the owner's policy.
+- The PWA caches application assets; mutations require a working API. Browser checks use Chromium desktop/mobile emulation, with mocked API tests isolated from service workers. Real cache/update checks are recorded separately.
+- English remains the initial supported language. Additional language catalogs require language selection and translation review. Onboarding uses employee-assisted active accounts with an initial password; invitation acceptance is not an enabled workflow.
+- Attachments, SLA rules, native MAUI clients, push notifications and offline mutation queues are separate product initiatives. No guessed business rules have been introduced. Employee performance is available; team-level aggregation is a possible reporting extension.
+- The deployment uses staged file copies and an atomic frontend entry-point switch, not fully atomic backend release directories. Keep migrations backward compatible. CSV batches are not a database snapshot during concurrent changes.
 
 ## 19. Troubleshooting
 
@@ -909,7 +878,7 @@ These are source-review findings or explicitly identified verification tasks, no
 | Password appears correct but login fails | Confirm realm/email, active master/account state, deletion flags, lockout time, and that the API points to the intended database. Use recovery only after identifying the target account/environment. |
 | Health is OK but business pages fail | `/health` is liveness only. Inspect private PHP logs, database connectivity, missing migrations, and authorization; it does not test a DB connection. |
 | Search fails with parameter errors | Inspect reused named placeholders under native PDO prepares; bind each occurrence separately. |
-| Older tickets or CSV rows missing | Account for frontend limits (100 tickets; 500 ledger rows) before concluding records are absent. |
+| Older tickets or CSV rows missing | Check server pagination, active filters and location permissions; CSV now retrieves all matching batches. |
 | Reset email does not arrive | Verify a pending `email_jobs` row, worker execution, sender configuration, transport result, retries, and spam/delivery behavior. |
 | New PHP syntax/dependency errors | Compare actual PHP runtime to the declared 8.3+ requirement; Composer's emulated platform does not upgrade the installed interpreter. |
 

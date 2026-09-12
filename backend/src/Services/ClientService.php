@@ -9,6 +9,7 @@ use App\Exceptions\NotFoundException;
 use App\Exceptions\ValidationException;
 use App\Models\Actor;
 use App\Repositories\ClientRepository;
+use App\Repositories\TicketRepository;
 use App\Utils\Input;
 use App\Utils\Validator;
 
@@ -19,7 +20,7 @@ final class ClientService
     private const ADMIN_FIELDS = ['full_name', 'designation', 'email', 'mobile_number'];
     private const CONTACT_FIELDS = ['full_name', 'designation', 'email', 'mobile_number', 'alternate_number', 'has_all_locations', 'is_primary_contact', 'role_code'];
 
-    public function __construct(private readonly ClientRepository $repository, private readonly Validator $validator)
+    public function __construct(private readonly ClientRepository $repository, private readonly Validator $validator, private readonly TicketRepository $tickets)
     {
     }
 
@@ -34,7 +35,15 @@ final class ClientService
     public function get(int $id, Actor $actor): array
     {
         $this->assertClientScope($id, $actor);
-        return $this->repository->find($id) ?? throw new NotFoundException('Client not found.');
+        $client = $this->repository->find($id) ?? throw new NotFoundException('Client not found.');
+        if ($actor->type === 'CLIENT_CONTACT') {
+            $client['contacts'] = array_values(array_filter($client['contacts'], static fn (array $contact): bool => (int) $contact['contact_id'] === $actor->id));
+            $contact = $client['contacts'][0] ?? null;
+            $client['locations'] = array_values(array_filter($client['locations'], static fn (array $location): bool =>
+                $contact !== null && (bool) $location['is_active'] && ((bool) $contact['has_all_locations'] || in_array((int) $location['location_id'], $contact['location_ids'], true))));
+            unset($client['notes']);
+        }
+        return $client;
     }
 
     public function create(array $input, Actor $actor): array
@@ -214,11 +223,7 @@ final class ClientService
     public function history(int $id, array $query, Actor $actor): array
     {
         $this->get($id, $actor);
-        return $this->repository->serviceHistory(
-            $id,
-            Input::positiveInt($query['page'] ?? null, 1),
-            min(100, Input::positiveInt($query['limit'] ?? null, 20)),
-        );
+        return $this->tickets->paginate(array_merge($query, ['client_id' => $id]), $actor);
     }
 
     private function assertClientScope(int $id, Actor $actor): void
@@ -226,6 +231,24 @@ final class ClientService
         if ($actor->type === 'CLIENT_CONTACT' && $actor->clientId !== $id) {
             throw new AuthorizationException();
         }
+    }
+
+    public function removeLocation(int $clientId, int $locationId, Actor $actor): array
+    {
+        $this->assertEmployee($actor);
+        $client = $this->get($clientId, $actor);
+        $this->assertNestedExists($client['locations'], 'location_id', $locationId, 'Client site not found.');
+        $this->repository->removeLocation($clientId, $locationId, $actor->identifier());
+        return $this->get($clientId, $actor);
+    }
+
+    public function removeContact(int $clientId, int $contactId, Actor $actor): array
+    {
+        $this->assertEmployee($actor);
+        $client = $this->get($clientId, $actor);
+        $this->assertNestedExists($client['contacts'], 'contact_id', $contactId, 'Client contact not found.');
+        $this->repository->removeContact($clientId, $contactId, $actor->identifier());
+        return $this->get($clientId, $actor);
     }
 
     private function validateOnboarding(array $client, array $location, array $administrator): void

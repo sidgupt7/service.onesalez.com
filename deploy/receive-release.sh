@@ -30,6 +30,8 @@ php -l "$stage/new/api/index.php"
 php -l "$stage/new/app/bootstrap.php"
 backup="$base/backups/$(date -u +%Y%m%dT%H%M%S)-$revision.tar.gz"
 tar -czf "$backup" --exclude=./app/logs --exclude=./app/uploads -C "$live" .
+# Keep a consistent database backup before changing application code or schema.
+php "$stage/new/app/bin/backup.php" "$base/backups" "$live/app"
 
 rollback() {
   echo 'Deployment failed; restoring previous files.' >&2
@@ -42,6 +44,7 @@ rollback() {
 trap rollback ERR
 # Preserve private runtime state; retain old static assets for already-open clients.
 rsync -a --delay-updates --delete --exclude=/.env --exclude=/logs/ --exclude=/uploads/ "$stage/new/app/" "$live/app/"
+php "$live/app/bin/migrate.php"
 rsync -a --delay-updates --exclude=/app/ --exclude=/index.html --exclude=/deploy-version.txt "$stage/new/" "$live/"
 cp "$stage/new/index.html" "$live/.index.html.next"
 chmod 644 "$live/.index.html.next"

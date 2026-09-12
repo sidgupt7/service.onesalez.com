@@ -1,5 +1,7 @@
 <?php
+
 declare(strict_types=1);
+
 namespace App\Services;
 
 use PHPMailer\PHPMailer\PHPMailer;
@@ -7,7 +9,9 @@ use RuntimeException;
 
 final class SmtpMailer
 {
-    public function __construct(private readonly array $config) {}
+    public function __construct(private readonly array $config)
+    {
+    }
 
     public function message(string $recipient, string $subject, string $body): PHPMailer
     {
@@ -27,7 +31,7 @@ final class SmtpMailer
         $mail->SMTPSecure = $this->config['encryption'] === 'ssl'
             ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Timeout = 20;
-        $mail->Timelimit = 30;
+        $mail->getSMTPInstance()->Timelimit = 30;
         $mail->SMTPDebug = 0;
         $mail->CharSet = PHPMailer::CHARSET_UTF8;
         $mail->setFrom($this->config['from'], $this->config['from_name']);
